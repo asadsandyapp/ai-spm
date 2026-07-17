@@ -1,0 +1,18 @@
+[package]
+name = "agent-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[test]]
+name = "basic_test"
+path = "basic_test.rs"
+harness = true
+
+[dev-dependencies]
+agent-core = { path = "../../crates/agent-core" }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+serde_json.workspace = true
+uuid.workspace = true

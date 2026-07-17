@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agent-core",
+    "crates/agent-service",
+    "crates/agent-tray",
+    "crates/agent-installer",
+    "tests/integration",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+authors = ["AI-SPM Platform"]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", features = ["server", "client", "tokio", "http1"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Pin ring only; aws-lc also arrives via reqwest — install_default(ring) at process start.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
+webpki-roots = "0.26"
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "rustls-native-certs", "tls12", "ring"] }
+boring = "5"
+tokio-boring = "5"
+hyper-boring = "5"
+dashmap = "6"
+time = { version = "0.3", features = ["std"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+hostname = "0.4"

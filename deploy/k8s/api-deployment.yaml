@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aispm-api
+  labels:
+    app: aispm-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: aispm-api
+  template:
+    metadata:
+      labels:
+        app: aispm-api
+    spec:
+      containers:
+        - name: api
+          image: aispm/api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: aispm-secrets
+            - configMapRef:
+                name: aispm-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aispm-api
+spec:
+  selector:
+    app: aispm-api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aispm-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aispm-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

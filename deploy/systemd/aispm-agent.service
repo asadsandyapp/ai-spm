@@ -1,0 +1,22 @@
+[Unit]
+Description=AI-SPM Endpoint Agent
+Documentation=https://github.com/ai-spm/platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aispm
+Group=aispm
+EnvironmentFile=-/etc/ai-spm/agent.env
+ExecStart=/usr/local/bin/agent-service
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/ai-spm/certs
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "AI-SPM Prompt Guard",
+  "version": "1.0.12",
+  "description": "Enterprise AI prompt security — masks sensitive data before it leaves the browser.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8092/*",
+    "http://localhost:8092/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "prompt-guard@aispm.io",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://*.openai.com/*",
+        "https://claude.ai/*",
+        "https://*.claude.ai/*",
+        "https://*.anthropic.com/*",
+        "https://gemini.google.com/*",
+        "https://*.gemini.google.com/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://*.openai.com/*",
+        "https://claude.ai/*",
+        "https://*.claude.ai/*",
+        "https://*.anthropic.com/*",
+        "https://gemini.google.com/*",
+        "https://*.gemini.google.com/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aispm
+      POSTGRES_PASSWORD: aispm
+      POSTGRES_DB: aispm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aispm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      # Host 6380 -> container 6379 (host 6379 is used by a native Redis on this machine).
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aispm:aispm@postgres:5432/aispm
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      PLATFORM_JWT_SECRET_KEY: ${PLATFORM_JWT_SECRET_KEY:-dev-platform-secret}
+      APP_ENV: development
+      DEBUG: "true"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      AISPM_PUBLIC_GATEWAY_URL: ${AISPM_PUBLIC_GATEWAY_URL:-http://localhost:8090}
+      AISPM_INSTALLER_LINUX_DIR: /opt/ai-spm/installer-linux
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+    volumes:
+      - ../dist/linux-installer:/opt/ai-spm/installer-linux:ro
+      - ../scripts:/opt/ai-spm/scripts-src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             python scripts/seed_platform_admin.py &&
+             python scripts/seed_dev_tenant.py &&
+             uvicorn ai_spm.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  kong:
+    image: kong:3.8
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_LOG_LEVEL: info
+    ports:
+      # Host 8090 -> Kong proxy (host 8080 is used by another Docker project).
+      - "8090:8000"
+      - "8443:8443"
+      - "8001:8001"
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      - prometheus
+
+  dashboard:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # Browser reaches Kong on host 8090 (remapped from 8080).
+        VITE_API_URL: http://localhost:8090
+    ports:
+      - "3000:80"
+    depends_on:
+      - kong
+
+volumes:
+  postgres_data:
+  minio_data:

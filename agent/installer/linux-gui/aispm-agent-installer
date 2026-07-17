@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Employee launcher — zero prompts except the OS password dialog (pkexec/sudo).
+# No python3-tk required. Optional wizard: AISPM_FORCE_GUI=1 (when Tk is installed).
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
+if [[ ! -f "${HERE}/enrollment.env" ]]; then
+  msg="enrollment.env missing. Download the package from Admin → Download Agent."
+  if command -v zenity >/dev/null 2>&1; then
+    zenity --error --title="AI-SPM Agent" --text="${msg}" || true
+  fi
+  echo "ERROR: ${msg}" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1091
+set -a
+source "${HERE}/enrollment.env"
+set +a
+
+if [[ ! -f "${HERE}/install-agent.sh" ]]; then
+  echo "ERROR: install-agent.sh missing from package." >&2
+  exit 1
+fi
+
+# Optional legacy GUI only when explicitly requested and Tk works.
+if [[ "${AISPM_FORCE_GUI:-0}" == "1" ]] \
+   && [[ -f "${HERE}/aispm-agent-installer-gui.py" ]] \
+   && command -v python3 >/dev/null 2>&1 \
+   && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] \
+   && python3 -c "import tkinter" >/dev/null 2>&1; then
+  exec python3 "${HERE}/aispm-agent-installer-gui.py"
+fi
+
+ORG_LABEL="${AISPM_ORG_NAME:-your organization}"
+echo "Installing AI-SPM endpoint agent for ${ORG_LABEL}…"
+echo "  Gateway: ${AISPM_GATEWAY_URL}"
+echo "  You will be asked for your password once."
+
+BASH_BIN="$(command -v bash || echo /bin/bash)"
+INSTALL_SH="${HERE}/install-agent.sh"
+
+run_elevated() {
+  if command -v pkexec >/dev/null 2>&1; then
+    # Absolute interpreter + enriched PATH so install-agent.sh finds iptables/systemctl.
+    exec pkexec env \
+      PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      "AISPM_GATEWAY_URL=${AISPM_GATEWAY_URL}" \
+      "AISPM_ORG_ID=${AISPM_ORG_ID}" \
+      "AISPM_ORG_TOKEN=${AISPM_ORG_TOKEN}" \
+      "AISPM_ORG_NAME=${AISPM_ORG_NAME:-}" \
+      "${BASH_BIN}" "${INSTALL_SH}"
+  fi
+  exec sudo env \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "AISPM_GATEWAY_URL=${AISPM_GATEWAY_URL}" \
+    "AISPM_ORG_ID=${AISPM_ORG_ID}" \
+    "AISPM_ORG_TOKEN=${AISPM_ORG_TOKEN}" \
+    "AISPM_ORG_NAME=${AISPM_ORG_NAME:-}" \
+    "${BASH_BIN}" "${INSTALL_SH}"
+}
+
+run_elevated

@@ -1,0 +1,50 @@
+_format_version: "3.0"
+
+services:
+  - name: ai-spm-api
+    url: http://api:8000
+    routes:
+      - name: public-routes
+        paths:
+          - /public/v1
+        strip_path: false
+      - name: admin-routes
+        paths:
+          - /admin/v1
+        strip_path: false
+      - name: agent-routes
+        paths:
+          - /agent/v1
+        strip_path: false
+      - name: platform-routes
+        paths:
+          - /platform/v1
+        strip_path: false
+      - name: health-metrics
+        paths:
+          - /health
+          - /ready
+          - /metrics
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 1000
+          policy: local
+          fault_tolerant: true
+      - name: correlation-id
+        config:
+          header_name: X-Correlation-ID
+          generator: uuid
+          echo_downstream: true
+      - name: request-transformer
+        route: agent-routes
+        config:
+          add:
+            headers:
+              - "X-Gateway: kong"
+
+plugins:
+  - name: prometheus
+    config:
+      per_consumer: true

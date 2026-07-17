@@ -1,0 +1,39 @@
+[package]
+name = "agent-core"
+description = "AI-SPM endpoint agent core library (proxy, gateway, heartbeat, config)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
+tokio-rustls.workspace = true
+rcgen = { workspace = true, features = ["pem", "x509-parser"] }
+webpki-roots.workspace = true
+hyper-rustls.workspace = true
+boring.workspace = true
+tokio-boring.workspace = true
+hyper-boring.workspace = true
+dashmap.workspace = true
+time.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+hostname.workspace = true
+http = "1"
+libc = "0.2"
+socket2 = "0.5"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

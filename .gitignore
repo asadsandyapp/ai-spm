@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Rust
+agent/target/
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Build output
+dist/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.log
