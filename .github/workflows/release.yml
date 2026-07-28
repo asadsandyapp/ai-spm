@@ -51,4 +51,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/AI-SPM-DLP-Agent-*.zip
+          # Evergreen "what this is / how to install it" blurb
+          # (packaging/RELEASE-NOTES.md, tracked and hand-maintained) forms
+          # the top of the release body; GitHub's auto-generated
+          # commit/PR list is appended below it via generate_release_notes.
+          body_path: packaging/RELEASE-NOTES.md
           generate_release_notes: true

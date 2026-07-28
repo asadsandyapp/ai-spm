@@ -15,11 +15,18 @@
   packaging\INSTALL-NOTES.txt is the tracked, hand-maintained source of the
   usage notes bundled with every build - edit it there, not in dist\.
 
-  Resolves the WiX Toolset bin directory from the machine-level WIX
-  environment variable (not $env:WIX) - a shell session started before the
-  WiX Toolset was installed won't have picked up the machine env var
-  refresh, but reading it via [System.Environment]::GetEnvironmentVariable
-  works regardless of when the current session started.
+  Resolves the WiX Toolset bin directory three ways, in order, since not
+  every install method sets things up identically (this was found the hard
+  way: the CI job's `choco install wixtoolset` didn't leave things
+  resolvable the same way a local winget install did):
+    1. The machine-level WIX environment variable, read directly via
+       [System.Environment]::GetEnvironmentVariable(...,"Machine") rather
+       than $env:WIX - a shell session started before the WiX Toolset was
+       installed won't have picked up the machine env var refresh, but the
+       direct registry read works regardless of when the session started.
+    2. candle.exe already on PATH.
+    3. A direct filesystem search under Program Files for a WiX Toolset
+       install (covers install methods that don't set the WIX env var).
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -32,11 +39,34 @@ cargo build --release --workspace
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
 Write-Host "== Resolving WiX Toolset location ==" -ForegroundColor Cyan
+$wixBin = $null
+
 $wixRoot = [System.Environment]::GetEnvironmentVariable("WIX", "Machine")
-if (-not $wixRoot) {
-    throw "WIX environment variable not set - install the WiX Toolset v3 first (winget install --id WiXToolset.WiXToolset)."
+if ($wixRoot -and (Test-Path (Join-Path $wixRoot "bin\candle.exe"))) {
+    $wixBin = Join-Path $wixRoot "bin"
+    Write-Host "Found via WIX environment variable: $wixBin"
 }
-$wixBin = Join-Path $wixRoot "bin"
+
+if (-not $wixBin) {
+    $candleOnPath = Get-Command candle.exe -ErrorAction SilentlyContinue
+    if ($candleOnPath) {
+        $wixBin = Split-Path $candleOnPath.Source -Parent
+        Write-Host "Found via PATH: $wixBin"
+    }
+}
+
+if (-not $wixBin) {
+    $found = Get-ChildItem -Path "C:\Program Files*\WiX Toolset*\bin\candle.exe" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($found) {
+        $wixBin = Split-Path $found.FullName -Parent
+        Write-Host "Found via filesystem search: $wixBin"
+    }
+}
+
+if (-not $wixBin) {
+    throw "Could not locate the WiX Toolset (candle.exe/light.exe) via the WIX environment variable, PATH, or Program Files - install the WiX Toolset v3 first (winget install --id WiXToolset.WiXToolset, or choco install wixtoolset)."
+}
 
 Write-Host "== Building the MSI (cargo wix) ==" -ForegroundColor Cyan
 cargo wix -p agent -b $wixBin
