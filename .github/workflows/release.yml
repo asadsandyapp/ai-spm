@@ -43,6 +43,14 @@ jobs:
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-wix
+        # The WiX Toolset install above provides candle.exe/light.exe;
+        # this is the separate `cargo wix` subcommand itself, which
+        # package-release.ps1 shells out to - a first release run failed
+        # with "no such command: wix" because only the toolset, not this
+        # subcommand, was ever installed on the runner.
+        run: cargo install cargo-wix
+
       - name: Build and package release
         shell: pwsh
         run: ./scripts/package-release.ps1
