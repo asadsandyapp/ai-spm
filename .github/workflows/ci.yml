@@ -1,0 +1,37 @@
+name: CI
+
+# This project is Windows-only (Win32 APIs, x86_64-pc-windows-msvc target),
+# so CI runs on windows-latest rather than the usual ubuntu default.
+on:
+  push:
+    branches: ["rust"]
+  pull_request:
+    branches: ["rust"]
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install NASM
+        # Build-time dependency of the TLS/crypto stack (aws-lc-rs, pulled
+        # in via rustls) - not preinstalled on the windows-latest runner
+        # image, unlike CMake, which already is.
+        uses: ilammy/setup-nasm@v1
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace
+        run: cargo build --workspace --verbose
+
+      - name: Run tests
+        run: cargo test --workspace --verbose
