@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agent-core",
+    "crates/agent-ca",
+    "crates/agent-dlp",
+    "crates/agent-proxy",
+    "crates/agent-sysnet",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+authors = ["Nabeel Qadri <nabeel.qadri@sandyapps.co>"]
+
+[package]
+name = "agent"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "agentd"
+path = "src/bin/agentd.rs"
+
+[[bin]]
+name = "agentctl"
+path = "src/bin/agentctl.rs"
+
+[dependencies]
+agent-core = { workspace = true }
+agent-ca = { workspace = true }
+agent-dlp = { workspace = true }
+agent-proxy = { workspace = true }
+agent-sysnet = { workspace = true }
+tokio = { workspace = true }
+hudsucker = { workspace = true }
+rustls = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+
+[workspace.dependencies]
+agent-core = { path = "crates/agent-core" }
+agent-ca = { path = "crates/agent-ca" }
+agent-dlp = { path = "crates/agent-dlp" }
+agent-proxy = { path = "crates/agent-proxy" }
+agent-sysnet = { path = "crates/agent-sysnet" }
+
+tokio = { version = "1", features = ["full"] }
+hudsucker = "0.25"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rcgen = "0.14"
+windows = "0.61"
+regex = "1"
+aho-corasick = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+clap = { version = "4", features = ["derive"] }
+thiserror = "1"
+anyhow = "1"
+bytes = "1"
+http-body-util = "0.1"
+
+[profile.release]
+opt-level = 2
