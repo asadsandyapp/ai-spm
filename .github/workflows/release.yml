@@ -1,0 +1,54 @@
+name: Release
+
+# Builds the production package the same way scripts/package-release.ps1
+# does locally (build -> cargo wix -> dist/ zip with install notes), then
+# attaches the resulting zip to a GitHub Release whenever a version tag is
+# pushed (e.g. v0.1.0 - match Cargo.toml's [workspace.package] version).
+# Reuses the exact same script as the manual/local path, so there's one
+# source of truth for how a release is assembled, not a second copy that
+# can drift.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install NASM
+        # Build-time dependency of the TLS/crypto stack (aws-lc-rs).
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install WiX Toolset v3
+        # scripts/package-release.ps1 resolves candle.exe/light.exe via the
+        # machine-level WIX environment variable read directly through
+        # [System.Environment]::GetEnvironmentVariable(...,"Machine") rather
+        # than $env:WIX, specifically so it picks up whatever this install
+        # step just wrote to the registry even though it happens mid-job.
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build and package release
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AI-SPM-DLP-Agent-*.zip
+          generate_release_notes: true

@@ -498,7 +498,17 @@ The script resolves the WiX Toolset's `bin` directory from the machine-level
 `WIX` environment variable rather than `$env:WIX`, since a shell session
 started before the WiX Toolset was installed won't have picked up that env
 var - reading it via `[System.Environment]::GetEnvironmentVariable("WIX",
-"Machine")` works regardless of when the current session started.
+"Machine")` works regardless of when the current session started. This is
+also why `.github/workflows/release.yml` (below) can install the WiX
+Toolset and run this same script within one CI job without issue.
+
+**Automated releases:** pushing a tag matching `v*` (e.g. `v0.1.0` - match
+`Cargo.toml`'s `[workspace.package]` version) triggers
+`.github/workflows/release.yml`, which runs on a `windows-latest` runner,
+installs NASM and the WiX Toolset, runs this exact same
+`scripts/package-release.ps1`, and publishes the resulting zip as a GitHub
+Release asset. One source of truth for how a release is assembled, whether
+built locally or in CI.
 
 Manual/lower-level equivalent, if you need just the `.msi` without the
 zip/notes bundle:
