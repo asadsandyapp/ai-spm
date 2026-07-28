@@ -36,7 +36,7 @@ export function ThreatsPage() {
     <>
       <PageHeader
         title="Threat Feed"
-        description="Real-time stream of blocked prompts, policy violations, and detected threats."
+        description="PII events show original + masked prompts so admins can see what the user typed. Clean prompts without sensitive data stay in Audit Log only."
         actions={
           <button
             className="btn-ghost"
@@ -109,7 +109,7 @@ export function ThreatsPage() {
           <EmptyState
             icon={ShieldAlert}
             title="No threats detected"
-            description="Threat events will appear here when prompts are blocked or policy violations occur."
+            description="PII detections and security blocks will appear here. Clean prompts are in Audit Log only."
           />
         ) : (
           <div className="scroll-thin overflow-x-auto">
@@ -118,7 +118,8 @@ export function ThreatsPage() {
                 <tr className="border-b border-ink-200 bg-ink-50/60 text-xs uppercase tracking-wide text-ink-500">
                   <th className="px-5 py-3 font-semibold">Severity</th>
                   <th className="px-5 py-3 font-semibold">Event Type</th>
-                  <th className="px-5 py-3 font-semibold">Details</th>
+                  <th className="px-5 py-3 font-semibold">Original prompt</th>
+                  <th className="px-5 py-3 font-semibold">Masked prompt</th>
                   <th className="px-5 py-3 font-semibold">AI Agent</th>
                   <th className="px-5 py-3 font-semibold">Device</th>
                   <th className="px-5 py-3 font-semibold whitespace-nowrap">
@@ -135,8 +136,21 @@ export function ThreatsPage() {
                     <td className="px-5 py-3.5">
                       <StatusBadge status={t.event_type} />
                     </td>
-                    <td className="px-5 py-3.5 max-w-md">
-                      <p className="truncate text-ink-700">
+                    <td className="px-5 py-3.5 max-w-sm">
+                      <p
+                        className="whitespace-pre-wrap break-words text-ink-700"
+                        title={t.original_content || undefined}
+                      >
+                        {t.original_content || (
+                          <span className="text-ink-400">—</span>
+                        )}
+                      </p>
+                    </td>
+                    <td className="px-5 py-3.5 max-w-sm">
+                      <p
+                        className="whitespace-pre-wrap break-words text-ink-700"
+                        title={t.masked_content || undefined}
+                      >
                         {t.masked_content || (
                           <span className="text-ink-400">No content captured</span>
                         )}

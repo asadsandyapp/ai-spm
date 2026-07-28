@@ -24,6 +24,12 @@ def test_build_linux_installer_is_sealed_sfx(tmp_path: Path, monkeypatch):
     ext.mkdir()
     (ext / "manifest.json").write_text('{"version":"1.0.0","name":"t"}\n', encoding="utf-8")
     (ext / "background.js").write_text("// bg\n", encoding="utf-8")
+    mitm = asset / "mitmproxy"
+    mitm.mkdir()
+    (mitm / "web_ui_mitm.py").write_text("# addon\n", encoding="utf-8")
+    (mitm / "pii_rules.py").write_text("# rules\n", encoding="utf-8")
+    (mitm / "start-web-mitm.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (mitm / "start-web-mitm.sh").chmod(0o755)
 
     import ai_spm.services.enrollment_service as es
 
@@ -55,6 +61,9 @@ def test_build_linux_installer_is_sealed_sfx(tmp_path: Path, monkeypatch):
         assert "aispm-agent-installer" in names
         assert "browser-extension/manifest.json" in names
         assert "browser-extension/background.js" in names
+        assert "mitmproxy/web_ui_mitm.py" in names
+        assert "mitmproxy/pii_rules.py" in names
+        assert "mitmproxy/start-web-mitm.sh" in names
         env = tar.extractfile("enrollment.env").read().decode()
     assert "AISPM_GATEWAY_URL='http://localhost:8090'" in env or "AISPM_GATEWAY_URL=http://localhost:8090" in env
     assert f"AISPM_ORG_ID={org_id}" in env or f"AISPM_ORG_ID='{org_id}'" in env
@@ -85,6 +94,12 @@ def test_build_linux_zip_alias_returns_sfx(tmp_path: Path, monkeypatch):
     asset = tmp_path / "assets"
     asset.mkdir()
     (asset / "install-agent.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    mitm = asset / "mitmproxy"
+    mitm.mkdir()
+    (mitm / "web_ui_mitm.py").write_text("# addon\n", encoding="utf-8")
+    (mitm / "pii_rules.py").write_text("# rules\n", encoding="utf-8")
+    (mitm / "start-web-mitm.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (mitm / "start-web-mitm.sh").chmod(0o755)
 
     import ai_spm.services.enrollment_service as es
 
@@ -98,3 +113,26 @@ def test_build_linux_zip_alias_returns_sfx(tmp_path: Path, monkeypatch):
     )
     assert blob.startswith(b"#!/usr/bin/env bash")
     assert PAYLOAD_MARKER in blob
+
+
+def test_sealed_installer_requires_mitmproxy(tmp_path: Path, monkeypatch):
+    asset = tmp_path / "assets"
+    asset.mkdir()
+    (asset / "install-agent.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+
+    import ai_spm.services.enrollment_service as es
+
+    monkeypatch.setattr(es, "installer_asset_dir", lambda settings=None: asset)
+    monkeypatch.setattr(es, "_repo_dir", lambda *parts: None)
+    monkeypatch.setattr(es, "_repo_file", lambda *parts: None)
+
+    try:
+        EnrollmentService().build_linux_installer(
+            gateway_url="http://localhost:8090",
+            org_id=uuid4(),
+            org_token="tok",
+            org_name="Org",
+        )
+        raise AssertionError("expected RuntimeError for missing mitmproxy")
+    except RuntimeError as exc:
+        assert "mitmproxy" in str(exc).lower()

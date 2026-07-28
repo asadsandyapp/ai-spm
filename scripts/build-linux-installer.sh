@@ -31,8 +31,19 @@ if [[ -f "${ROOT}/scripts/reconcile-browser-extensions.sh" ]]; then
     "${OUT}/reconcile-browser-extensions.sh"
 fi
 
-# Managed browser extension (Chrome/Edge/Brave/… + Firefox) — required for CF web UIs.
-# Sealed Admin download embeds this so install works without a git checkout.
+# SPM-style mitmproxy addon for ChatGPT/Claude/Gemini web UIs (required).
+if [[ ! -f "${ROOT}/scripts/mitmproxy/web_ui_mitm.py" || ! -f "${ROOT}/scripts/mitmproxy/start-web-mitm.sh" || ! -f "${ROOT}/scripts/mitmproxy/pii_rules.py" ]]; then
+  echo "ERROR: scripts/mitmproxy/{web_ui_mitm.py,start-web-mitm.sh,pii_rules.py} required for endpoint install." >&2
+  exit 1
+fi
+echo "→ Staging mitmproxy web UI masking scripts…"
+mkdir -p "${OUT}/mitmproxy"
+install -m 0644 "${ROOT}/scripts/mitmproxy/web_ui_mitm.py" "${OUT}/mitmproxy/web_ui_mitm.py"
+install -m 0644 "${ROOT}/scripts/mitmproxy/pii_rules.py" "${OUT}/mitmproxy/pii_rules.py"
+install -m 0755 "${ROOT}/scripts/mitmproxy/start-web-mitm.sh" "${OUT}/mitmproxy/start-web-mitm.sh"
+
+# Managed browser extension (legacy / optional — not installed by default).
+# Sealed Admin download may still embed sources for cleanup tools.
 EXT_SRC="${ROOT}/browser-extension"
 if [[ -d "${EXT_SRC}" && -f "${EXT_SRC}/manifest.json" ]]; then
   echo "→ Staging browser-extension for managed install…"

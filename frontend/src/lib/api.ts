@@ -11,11 +11,13 @@ import type {
   LLMConfigResponse,
   LoginRequest,
   OrgTokenRotateResponse,
+  PiiDetectionPolicy,
   PolicyResponse,
   TenantDetailResponse,
   TenantListItem,
   ThreatEventResponse,
   TokenResponse,
+  UpdatePiiDetectionRequest,
   UpdatePolicyRequest,
   UsageResponse,
   UserResponse,
@@ -117,6 +119,13 @@ export const adminApi = {
     }),
   policies: (signal?: AbortSignal) =>
     request<PolicyResponse[]>("/admin/v1/policies", { signal }),
+  piiDetections: (signal?: AbortSignal) =>
+    request<PiiDetectionPolicy[]>("/admin/v1/pii-detections", { signal }),
+  updatePiiDetection: (id: string, body: UpdatePiiDetectionRequest) =>
+    request<PiiDetectionPolicy>(`/admin/v1/pii-detections/${id}`, {
+      method: "PUT",
+      body,
+    }),
   dashboardMetrics: (signal?: AbortSignal) =>
     request<DashboardMetricsResponse>("/admin/v1/dashboard/metrics", { signal }),
   dashboardThreats: (limit = 50, signal?: AbortSignal) =>

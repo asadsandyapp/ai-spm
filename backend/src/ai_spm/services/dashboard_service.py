@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_spm.domain.enums import AgentStatus, AuditEventType
 from ai_spm.domain.models import Agent, AuditEvent, UsageDaily
+from ai_spm.services.web_audit_text import humanize_prompt_text
 
 
 class DashboardService:
@@ -107,6 +108,7 @@ class DashboardService:
                     AuditEventType.THREAT_DETECTED,
                     AuditEventType.POLICY_VIOLATION,
                     AuditEventType.PROMPT_BLOCKED,
+                    AuditEventType.PII_DETECTED,
                 ]),
             )
             .order_by(AuditEvent.created_at.desc())
@@ -124,12 +126,25 @@ class DashboardService:
             )
             hostnames = {row.id: row.hostname for row in host_result.all()}
 
+        def _severity(event_type: AuditEventType) -> str:
+            if event_type == AuditEventType.THREAT_DETECTED:
+                return "high"
+            if event_type == AuditEventType.PII_DETECTED:
+                return "medium"
+            return "medium"
+
         return [
             {
                 "id": str(e.id),
                 "event_type": e.event_type.value,
-                "severity": "high" if e.event_type == AuditEventType.THREAT_DETECTED else "medium",
-                "masked_content": (e.masked_content or "")[:200],
+                "severity": _severity(e.event_type),
+                "masked_content": (
+                    humanize_prompt_text(e.masked_content) or (e.masked_content or "")
+                )[:500],
+                "original_content": humanize_prompt_text(
+                    (e.metadata_ or {}).get("original_content")
+                )
+                or (e.metadata_ or {}).get("original_content"),
                 "metadata": e.metadata_,
                 "created_at": e.created_at.isoformat(),
                 "agent_id": str(e.agent_id) if e.agent_id else None,

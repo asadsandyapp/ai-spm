@@ -61,6 +61,36 @@ pub struct PromptRequest {
     pub inspect_only: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct WebAuditRequest {
+    pub provider: String,
+    #[serde(default = "default_web_model")]
+    pub model: String,
+    pub masked_content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_content: Option<String>,
+    #[serde(default)]
+    pub pii_entities: Vec<String>,
+    #[serde(default)]
+    pub pii_hit_count: u32,
+    #[serde(default = "default_web_source")]
+    pub source: String,
+}
+
+fn default_web_model() -> String {
+    "web-ui".to_string()
+}
+
+fn default_web_source() -> String {
+    "web_mitm".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebAuditResponse {
+    pub audit_event_id: Uuid,
+    pub event_type: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptResponse {
     pub decision: String,
@@ -69,6 +99,26 @@ pub struct PromptResponse {
     pub audit_event_id: Option<Uuid>,
     pub blocked_reason: Option<String>,
     pub block_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PiiPolicyPayload {
+    #[serde(default)]
+    pub enabled_entities: Vec<String>,
+    #[serde(default = "default_mask_action")]
+    pub action: String,
+}
+
+fn default_mask_action() -> String {
+    "mask".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HeartbeatResponse {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    pii_policy: Option<PiiPolicyPayload>,
 }
 
 #[derive(Debug, Error)]
@@ -362,7 +412,7 @@ impl GatewayClient {
         })
     }
 
-    /// `POST /agent/v1/heartbeat` — 60s health signal.
+    /// `POST /agent/v1/heartbeat` — 60s health signal; may include PII policy for web MITM.
     pub async fn heartbeat(&self) -> Result<(), GatewayError> {
         let response = self
             .http_client()
@@ -372,12 +422,32 @@ impl GatewayClient {
             .await?;
 
         let status = response.status();
-        if status.is_success() {
-            return Ok(());
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(GatewayError::Api { status, body });
         }
 
-        let body = response.text().await.unwrap_or_default();
-        Err(GatewayError::Api { status, body })
+        if let Ok(payload) = serde_json::from_str::<HeartbeatResponse>(&body) {
+            if let Some(policy) = payload.pii_policy {
+                if let Err(err) = Self::persist_pii_policy(&policy) {
+                    warn!(error = %err, "failed to persist PII policy for web MITM");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn persist_pii_policy(policy: &PiiPolicyPayload) -> Result<(), GatewayError> {
+        let path = Path::new("/etc/ai-spm/pii-policy.json");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = serde_json::to_vec_pretty(policy).map_err(|e| {
+            GatewayError::InvalidResponse(format!("serialize pii policy: {e}"))
+        })?;
+        fs::write(path, body)?;
+        debug!(path = %path.display(), entities = ?policy.enabled_entities, "wrote web MITM PII policy");
+        Ok(())
     }
 
     /// `POST /agent/v1/prompt` — submit intercepted prompt for policy pipeline.
@@ -388,6 +458,31 @@ impl GatewayClient {
         let response = self
             .http_client()
             .post(self.url("/prompt"))
+            .headers(self.auth_headers()?)
+            .json(request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body_text = response.text().await?;
+        if !status.is_success() {
+            return Err(GatewayError::Api {
+                status,
+                body: body_text,
+            });
+        }
+
+        serde_json::from_str(&body_text).map_err(|e| GatewayError::InvalidResponse(e.to_string()))
+    }
+
+    /// `POST /agent/v1/web-audit` — record web-UI MITM mask result (masked content only).
+    pub async fn submit_web_audit(
+        &self,
+        request: &WebAuditRequest,
+    ) -> Result<WebAuditResponse, GatewayError> {
+        let response = self
+            .http_client()
+            .post(self.url("/web-audit"))
             .headers(self.auth_headers()?)
             .json(request)
             .send()

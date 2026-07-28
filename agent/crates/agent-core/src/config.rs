@@ -13,7 +13,7 @@ pub const DEFAULT_TRANSPARENT_LISTEN: &str = "0.0.0.0:9443";
 /// Default local explicit proxy listen address (optional dev / legacy mode).
 pub const DEFAULT_PROXY_LISTEN: &str = "127.0.0.1:8080";
 
-/// Default localhost inspection API address for the managed browser extension.
+/// Legacy localhost API listen address (disabled by default; network MITM is primary).
 pub const DEFAULT_LOCAL_API_LISTEN: &str = "127.0.0.1:8092";
 
 /// Default gateway URL for local development.
@@ -239,7 +239,7 @@ impl Config {
         let local_api_enabled = Self::bool_setting(
             "AISPM_LOCAL_API_ENABLED",
             file_cfg.as_ref().and_then(|f| f.local_api_enabled),
-            true,
+            false,
         )?;
         let local_api_listen = env::var("AISPM_LOCAL_API_LISTEN")
             .ok()

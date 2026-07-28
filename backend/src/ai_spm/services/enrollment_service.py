@@ -209,8 +209,8 @@ fi
 
 if [[ "$rc" -eq 0 ]]; then
   echo ""
-  echo "Installation finished. Reopen Chrome/Firefox — Prompt Guard should appear automatically."
-  echo "Your admin can confirm this device under Agent Fleet."
+  echo "Installation finished. Fully quit and reopen your browser."
+  echo "ChatGPT web uses mitmproxy (SPM-style); your admin can confirm this device under Agent Fleet."
 fi
 exit "$rc"
 """
@@ -299,7 +299,7 @@ class EnrollmentService:
                     continue
                 tar.add(path, arcname=name, recursive=False)
 
-            # Prompt Guard sources — required so sealed install deploys to available browsers.
+            # Prompt Guard sources — optional legacy (not installed by default).
             ext_dir = root / "browser-extension"
             if not (ext_dir.is_dir() and (ext_dir / "manifest.json").is_file()):
                 ext_dir = _repo_dir("browser-extension") or Path()
@@ -311,6 +311,17 @@ class EnrollmentService:
                         continue
                     arc = f"browser-extension/{path.relative_to(ext_dir).as_posix()}"
                     tar.add(path, arcname=arc, recursive=False)
+
+            # SPM-style mitmproxy addon for ChatGPT / Claude / Gemini web UIs.
+            # Required on every endpoint install — do not ship a package without it.
+            mitm_dir = root / "mitmproxy"
+            if not (mitm_dir.is_dir() and (mitm_dir / "web_ui_mitm.py").is_file()):
+                mitm_dir = _repo_dir("scripts", "mitmproxy") or Path()
+            if mitm_dir.is_dir() and (mitm_dir / "web_ui_mitm.py").is_file():
+                for path in sorted(mitm_dir.iterdir()):
+                    if not path.is_file():
+                        continue
+                    tar.add(path, arcname=f"mitmproxy/{path.name}", recursive=False)
 
             if not any(m.name == "aispm-agent-installer" for m in tar.getmembers()):
                 fallback = _fallback_launcher_script().encode()
@@ -335,6 +346,21 @@ class EnrollmentService:
                     "Sealed installer missing install-agent.sh. "
                     "Run `make installer-linux`, then recreate the API container "
                     "(do not rm -rf dist/linux-installer while it is bind-mounted)."
+                )
+            if "mitmproxy/web_ui_mitm.py" not in member_names:
+                raise RuntimeError(
+                    "Sealed installer missing mitmproxy/web_ui_mitm.py. "
+                    "Run `make installer-linux` so dist/linux-installer/mitmproxy is staged."
+                )
+            if "mitmproxy/start-web-mitm.sh" not in member_names:
+                raise RuntimeError(
+                    "Sealed installer missing mitmproxy/start-web-mitm.sh. "
+                    "Run `make installer-linux` so dist/linux-installer/mitmproxy is staged."
+                )
+            if "mitmproxy/pii_rules.py" not in member_names:
+                raise RuntimeError(
+                    "Sealed installer missing mitmproxy/pii_rules.py. "
+                    "Run `make installer-linux` so dist/linux-installer/mitmproxy is staged."
                 )
 
         return buf.getvalue()

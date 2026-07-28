@@ -107,9 +107,32 @@ class AuditEventResponse(BaseModel):
     hostname: str | None = None
     provider: str | None = None
     masked_content: str | None
+    # Tenant-admin investigation (web MITM): may contain PII.
+    original_content: str | None = None
+    pii_entities: list[str] = Field(default_factory=list)
+    pii_hit_count: int = 0
+    source: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class WebAuditRequest(BaseModel):
+    """Endpoint web-MITM audit — human prompt text (not API JSON chunks)."""
+
+    provider: str = Field(default="chatgpt", max_length=64)
+    model: str = Field(default="web-ui", max_length=128)
+    masked_content: str = Field(..., min_length=1, max_length=8000)
+    # Unmasked user prompt for tenant-admin Threat/Audit review.
+    original_content: str | None = Field(default=None, max_length=8000)
+    pii_entities: list[str] = Field(default_factory=list)
+    pii_hit_count: int = Field(default=0, ge=0)
+    source: str = Field(default="web_mitm", max_length=64)
+
+
+class WebAuditResponse(BaseModel):
+    audit_event_id: UUID
+    event_type: str
 
 
 class PromptRequest(BaseModel):
@@ -193,6 +216,7 @@ class ThreatEventResponse(BaseModel):
     event_type: str
     severity: str
     masked_content: str
+    original_content: str | None = None
     metadata: dict
     created_at: str
     agent_id: str | None = None
@@ -212,6 +236,28 @@ class UpdatePolicyRequest(BaseModel):
     description: str | None = None
     rules: dict | None = None
     is_active: bool | None = None
+
+
+class PiiDetectionPolicyResponse(BaseModel):
+    id: str
+    name: str
+    category: str
+    description: str
+    mask: str
+    detectable: bool
+    enabled: bool
+    status: str
+
+
+class UpdatePiiDetectionRequest(BaseModel):
+    enabled: bool
+
+
+class AgentPiiPolicyResponse(BaseModel):
+    """Synced to endpoint agents / web MITM (enabled detectable entities only)."""
+
+    enabled_entities: list[str]
+    action: str = "mask"
 
 
 class CreateUserRequest(BaseModel):

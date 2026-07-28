@@ -4,6 +4,7 @@ import type {
   CreatePolicyRequest,
   CreateUserRequest,
   LLMConfigRequest,
+  UpdatePiiDetectionRequest,
   UpdatePolicyRequest,
 } from "@/types/api";
 
@@ -13,6 +14,7 @@ export const queryKeys = {
   enrollment: ["admin", "agents", "enrollment"] as const,
   audit: (limit: number) => ["admin", "audit", limit] as const,
   policies: ["admin", "policies"] as const,
+  piiDetections: ["admin", "pii-detections"] as const,
   dashboardMetrics: ["admin", "dashboard", "metrics"] as const,
   threats: (limit: number) => ["admin", "dashboard", "threats", limit] as const,
   users: ["admin", "users"] as const,
@@ -71,6 +73,28 @@ export function usePolicies() {
   return useQuery({
     queryKey: queryKeys.policies,
     queryFn: ({ signal }) => adminApi.policies(signal),
+  });
+}
+
+export function usePiiDetections() {
+  return useQuery({
+    queryKey: queryKeys.piiDetections,
+    queryFn: ({ signal }) => adminApi.piiDetections(signal),
+  });
+}
+
+export function useUpdatePiiDetection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: UpdatePiiDetectionRequest;
+    }) => adminApi.updatePiiDetection(id, body),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.piiDetections }),
   });
 }
 

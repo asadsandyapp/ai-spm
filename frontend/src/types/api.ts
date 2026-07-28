@@ -73,6 +73,12 @@ export interface AuditEventResponse {
   hostname: string | null;
   provider: string | null;
   masked_content: string | null;
+  /** Unmasked user prompt (admin investigation; may contain PII). */
+  original_content: string | null;
+  /** Entity types found — never raw PII values. */
+  pii_entities: string[];
+  pii_hit_count: number;
+  source: string | null;
   created_at: string;
 }
 
@@ -83,6 +89,21 @@ export interface PolicyResponse {
   rules: Record<string, unknown>;
   is_default: boolean;
   is_active: boolean;
+}
+
+export interface PiiDetectionPolicy {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  mask: string;
+  detectable: boolean;
+  enabled: boolean;
+  status: string;
+}
+
+export interface UpdatePiiDetectionRequest {
+  enabled: boolean;
 }
 
 export interface TenantListItem {
@@ -130,6 +151,7 @@ export interface ThreatEventResponse {
   event_type: string;
   severity: string;
   masked_content: string;
+  original_content: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   agent_id: string | null;

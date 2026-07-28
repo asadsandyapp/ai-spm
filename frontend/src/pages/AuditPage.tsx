@@ -59,7 +59,7 @@ export function AuditPage() {
     <>
       <PageHeader
         title="Audit Log"
-        description="Immutable record of AI prompts, policy decisions, and security events."
+        description="User prompts from ChatGPT / Claude / Gemini. Original + masked columns for admin review; API JSON chunks are stripped."
         actions={
           <div className="flex items-center gap-2">
             <select
@@ -154,7 +154,9 @@ export function AuditPage() {
               <thead>
                 <tr className="border-b border-ink-200 bg-ink-50/60 text-xs uppercase tracking-wide text-ink-500">
                   <th className="px-5 py-3 font-semibold">Event</th>
-                  <th className="px-5 py-3 font-semibold">Details</th>
+                  <th className="px-5 py-3 font-semibold">Original prompt</th>
+                  <th className="px-5 py-3 font-semibold">Masked prompt</th>
+                  <th className="px-5 py-3 font-semibold">Detected</th>
                   <th className="px-5 py-3 font-semibold">AI Agent</th>
                   <th className="px-5 py-3 font-semibold">Device</th>
                   <th className="px-5 py-3 font-semibold whitespace-nowrap">
@@ -168,14 +170,45 @@ export function AuditPage() {
                     <td className="px-5 py-3.5">
                       <StatusBadge status={e.event_type} />
                     </td>
-                    <td className="px-5 py-3.5 max-w-md">
-                      <p className="truncate text-ink-700">
+                    <td className="px-5 py-3.5 max-w-sm">
+                      <p className="whitespace-pre-wrap break-words text-ink-700">
+                        {e.original_content || (
+                          <span className="text-ink-400">—</span>
+                        )}
+                      </p>
+                    </td>
+                    <td className="px-5 py-3.5 max-w-sm">
+                      <p
+                        className="whitespace-pre-wrap break-words text-ink-700"
+                        title="Masked prompt as sent to the AI provider"
+                      >
                         {e.masked_content || (
                           <span className="text-ink-400">
                             No content captured
                           </span>
                         )}
                       </p>
+                    </td>
+                    <td className="px-5 py-3.5 max-w-xs">
+                      {(e.pii_entities?.length ?? 0) > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {e.pii_entities.map((ent) => (
+                            <span
+                              key={ent}
+                              className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+                            >
+                              {ent}
+                            </span>
+                          ))}
+                          {e.pii_hit_count > 0 && (
+                            <span className="text-xs text-ink-400">
+                              ×{e.pii_hit_count}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-ink-400">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5">
                       {providerLabel(e.provider) ? (

@@ -27,16 +27,13 @@ from ai_spm.infrastructure.db.session import get_platform_session
 DEV_SLUG = "dev-corp"
 DEV_ADMIN_EMAIL = "admin@devcorp.io"
 DEV_ADMIN_PASSWORD = "DevAdminPass123!"
+from ai_spm.services.pii_catalog import default_policy_rules
+
 DEV_ORG_TOKEN = "dev-org-token-please-change-32chars-minimum"
 
 # Model governance is opt-in: empty allow list permits all models so ordinary
 # web-UI traffic (e.g. ChatGPT's "auto" model) is not blocked before scanning.
-DEFAULT_POLICY_RULES = {
-    "models": {"allowed": []},
-    "pii": {"action": "mask", "entities": ["CNIC", "SSN", "CREDIT_CARD", "EMAIL", "PHONE"]},
-    "threats": {"action": "block", "threshold": 0.8},
-    "topics": {"blocked": []},
-}
+DEFAULT_POLICY_RULES = default_policy_rules()
 
 
 async def seed() -> None:

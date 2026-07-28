@@ -2,30 +2,31 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 import structlog
+
+from ai_spm.infrastructure.presidio.patterns import (
+    ENTITY_AUDIT_LABEL,
+    MASK_FORMATS,
+    REGEX_PATTERNS,
+    iter_patterns_for,
+)
 
 logger = structlog.get_logger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.7
 
-MASK_FORMATS = {
-    "CNIC": "*************",
-    "US_SSN": "***-**-****",
-    "CREDIT_CARD": "****-****-****-1234",
-    "EMAIL_ADDRESS": "***@***.com",
-    "PHONE_NUMBER": "***-***-****",
+# Presidio NLP entity types → our catalog IDs.
+_PRESIDIO_NLP_MAP = {
+    "PERSON_NAME": "PERSON",
+    "STREET_ADDRESS": "LOCATION",
 }
 
-REGEX_PATTERNS = {
-    "CNIC": re.compile(r"\b\d{5}-\d{7}-\d\b"),
-    "US_SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "CREDIT_CARD": re.compile(r"\b(?:\d{4}[\s-]?){3}\d{4}\b"),
-    "EMAIL_ADDRESS": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
-    "PHONE_NUMBER": re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
-}
+# Built-in Presidio pattern entities we prefer to run through the analyzer first.
+_PRESIDIO_NATIVE = frozenset(
+    {"CNIC", "US_SSN", "CREDIT_CARD", "EMAIL_ADDRESS", "PHONE_NUMBER"}
+)
 
 
 @dataclass
@@ -75,47 +76,97 @@ class PresidioAdapter:
             logger.warning("presidio_unavailable_using_regex_fallback", error=str(exc))
             self._use_presidio = False
 
-    def scan_and_mask(self, text: str) -> PIIScanResult:
+    def scan_and_mask(
+        self,
+        text: str,
+        entities: list[str] | None = None,
+    ) -> PIIScanResult:
         if not text:
             return PIIScanResult(masked_text="", entities=[], entity_count=0)
 
-        if self._use_presidio and self._analyzer and self._anonymizer:
-            return self._presidio_mask(text)
-        return self._regex_mask(text)
+        active = self._resolve_entities(entities)
+        if not active:
+            return PIIScanResult(masked_text=text, entities=[], entity_count=0)
 
-    def _presidio_mask(self, text: str) -> PIIScanResult:
+        if self._use_presidio and self._analyzer and self._anonymizer:
+            return self._presidio_mask(text, active)
+        return self._regex_mask(text, active)
+
+    def _resolve_entities(self, entities: list[str] | None) -> list[str]:
+        if entities is None:
+            return list(REGEX_PATTERNS.keys())
+        # Only known detectable patterns; empty list = mask nothing.
+        return [e for e in entities if e in MASK_FORMATS]
+
+    def _presidio_mask(self, text: str, entities: list[str]) -> PIIScanResult:
         from presidio_anonymizer.entities import OperatorConfig
 
-        results = self._analyzer.analyze(
-            text=text,
-            language="en",
-            entities=list(MASK_FORMATS.keys()),
-            score_threshold=CONFIDENCE_THRESHOLD,
-        )
-        entities = sorted({r.entity_type for r in results})
+        native = [e for e in entities if e in _PRESIDIO_NATIVE]
+        nlp_wanted = [e for e in entities if e in _PRESIDIO_NLP_MAP]
+        custom = [e for e in entities if e not in native and e not in nlp_wanted]
+
+        analyze_entities = list(native) + [_PRESIDIO_NLP_MAP[e] for e in nlp_wanted]
+        results = []
+        if analyze_entities:
+            results = self._analyzer.analyze(
+                text=text,
+                language="en",
+                entities=analyze_entities,
+                score_threshold=CONFIDENCE_THRESHOLD,
+            )
+
+        # Map Presidio NLP types back to catalog IDs for masking / audit.
+        reverse_nlp = {v: k for k, v in _PRESIDIO_NLP_MAP.items()}
+        remapped = []
+        for r in results:
+            catalog_id = reverse_nlp.get(r.entity_type, r.entity_type)
+            if catalog_id not in entities and r.entity_type not in entities:
+                continue
+            r.entity_type = catalog_id if catalog_id in MASK_FORMATS else r.entity_type
+            remapped.append(r)
+        results = remapped
+
+        found = sorted({r.entity_type for r in results})
         operators = {
             entity: OperatorConfig(
                 "replace", {"new_value": MASK_FORMATS.get(entity, "[REDACTED]")}
             )
-            for entity in entities
+            for entity in found
         }
-        anonymized = self._anonymizer.anonymize(
-            text=text,
-            analyzer_results=results,
-            operators=operators,
-        )
+        masked = text
+        if results and operators:
+            anonymized = self._anonymizer.anonymize(
+                text=text,
+                analyzer_results=results,
+                operators=operators,
+            )
+            masked = anonymized.text
+
+        # Regex for catalog entities Presidio didn't cover (and NLP misses).
+        regex_entities = custom + [e for e in native + nlp_wanted if e not in found]
+        if regex_entities:
+            regex_result = self._regex_mask(masked, regex_entities)
+            audit = sorted(set(found) | set(regex_result.entities))
+            return PIIScanResult(
+                masked_text=regex_result.masked_text,
+                entities=[ENTITY_AUDIT_LABEL.get(e, e) for e in audit],
+                entity_count=len(results) + regex_result.entity_count,
+            )
+
         return PIIScanResult(
-            masked_text=anonymized.text,
-            entities=entities,
+            masked_text=masked,
+            entities=[ENTITY_AUDIT_LABEL.get(e, e) for e in found],
             entity_count=len(results),
         )
 
-    def _regex_mask(self, text: str) -> PIIScanResult:
+    def _regex_mask(self, text: str, entities: list[str]) -> PIIScanResult:
         masked = text
-        entities: list[str] = []
-        for entity, pattern in REGEX_PATTERNS.items():
-            if pattern.search(masked):
-                entities.append(entity if entity != "US_SSN" else "SSN")
-                mask = MASK_FORMATS.get(entity, f"[{entity}_REDACTED]")
-                masked = pattern.sub(mask, masked)
-        return PIIScanResult(masked_text=masked, entities=entities, entity_count=len(entities))
+        found: list[str] = []
+        count = 0
+        for entity, pattern, mask in iter_patterns_for(entities):
+            masked, n = pattern.subn(mask, masked)
+            if not n:
+                continue
+            count += n
+            found.append(ENTITY_AUDIT_LABEL.get(entity, entity))
+        return PIIScanResult(masked_text=masked, entities=found, entity_count=count)

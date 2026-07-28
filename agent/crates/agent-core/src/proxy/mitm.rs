@@ -15,7 +15,7 @@ use hyper_util::server::conn::auto::Builder as ServerBuilder;
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, info, warn};
 
-use super::parser::{is_intercept_path, parse_request_body, rewrite_body_with_masked};
+use super::parser::{is_intercept_path, parse_request_body, rewrite_raw_body};
 use super::upstream;
 use super::ProxyState;
 use crate::gateway::PromptRequest;
@@ -212,14 +212,10 @@ async fn handle_mitm_request(
                     Ok(response) => {
                         if response.decision == "masked" {
                             if let Some(masked) = response.masked_messages {
-                                if let Ok(root) =
-                                    serde_json::from_slice::<serde_json::Value>(&original_body)
-                                {
-                                    if let Some(rewritten) = rewrite_body_with_masked(
-                                        root,
-                                        &parsed.content_paths,
-                                        &masked,
-                                    ) {
+                                if let Ok(body_str) = std::str::from_utf8(&original_body) {
+                                    if let Some(rewritten) =
+                                        rewrite_raw_body(body_str, &parsed.content_paths, &masked)
+                                    {
                                         info!("PII masked in outbound request — forwarding sanitized body");
                                         forward_body = rewritten.into_bytes();
                                     }

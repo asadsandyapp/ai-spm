@@ -2,6 +2,8 @@
 
 Enterprise SaaS multi-tenant AI Security Posture Management platform.
 
+> **Full step-by-step setup (Linux + Windows):** see [SETUP_LINUX_AND_WINDOWS.md](SETUP_LINUX_AND_WINDOWS.md).
+
 ## Prerequisites
 
 | Tool | Version |

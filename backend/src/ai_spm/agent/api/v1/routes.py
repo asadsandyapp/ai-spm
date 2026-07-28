@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,20 +6,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_spm.core.schemas import (
+    AgentPiiPolicyResponse,
     AgentRegisterRequest,
     AgentRegisterWithCertResponse,
     AgentResponse,
     AgentUpdateCheckResponse,
     PromptRequest,
     PromptResponse,
+    WebAuditRequest,
+    WebAuditResponse,
 )
-from ai_spm.domain.enums import AgentStatus, AuditEventType
-from ai_spm.domain.models import Agent, Organization
+from ai_spm.domain.enums import AgentStatus, AuditEventType, PolicyAction
+from ai_spm.domain.models import Agent, AuditEvent, Organization
 from ai_spm.infrastructure.db.session import get_session
 from ai_spm.services.cert_service import CertService
+from ai_spm.services.policy_engine import PolicyEngine
 from ai_spm.services.prompt_pipeline import AgentService, PromptPipelineError, PromptPipelineService
+from ai_spm.services.web_audit_text import humanize_prompt_text
 from ai_spm.tenant.context import require_tenant_context
-from ai_spm.tenant.quota import QuotaExceededError
+from ai_spm.tenant.quota import QuotaExceededError, increment_prompt_usage
 
 logger = structlog.get_logger(__name__)
 
@@ -27,6 +32,7 @@ router = APIRouter(prefix="/agent/v1", tags=["agent"])
 agent_service = AgentService()
 prompt_service = PromptPipelineService()
 cert_service = CertService()
+policy_engine = PolicyEngine()
 
 AGENT_VERSION = "0.2.0"
 
@@ -97,7 +103,8 @@ async def register_agent(
 
 
 @router.post("/heartbeat")
-async def heartbeat(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+async def heartbeat(session: AsyncSession = Depends(get_session)) -> dict:
+    """Keep agent online and push current PII detection policy for web MITM."""
     ctx = require_tenant_context()
     if not ctx.agent_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent ID required")
@@ -107,7 +114,23 @@ async def heartbeat(session: AsyncSession = Depends(get_session)) -> dict[str, s
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent revoked")
     if result == "missing":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
-    return {"status": "ok"}
+
+    enabled = await policy_engine.resolve_enabled_pii_entities(session, ctx.org_id)
+    return {
+        "status": "ok",
+        "pii_policy": {
+            "enabled_entities": enabled,
+            "action": "mask",
+        },
+    }
+
+
+@router.get("/pii-policy", response_model=AgentPiiPolicyResponse)
+async def get_pii_policy(session: AsyncSession = Depends(get_session)) -> AgentPiiPolicyResponse:
+    """Endpoint agents / installers can poll for web-MITM entity toggles."""
+    ctx = require_tenant_context()
+    enabled = await policy_engine.resolve_enabled_pii_entities(session, ctx.org_id)
+    return AgentPiiPolicyResponse(enabled_entities=enabled, action="mask")
 
 
 @router.post("/unregister", status_code=status.HTTP_204_NO_CONTENT)
@@ -143,6 +166,49 @@ async def submit_prompt(
             detail=str(exc),
         ) from exc
     return PromptResponse(**result)
+
+
+@router.post("/web-audit", response_model=WebAuditResponse)
+async def web_audit(
+    body: WebAuditRequest,
+    session: AsyncSession = Depends(get_session),
+) -> WebAuditResponse:
+    """Record a web-UI MITM inspection (human prompt text; optional original for admins)."""
+    ctx = require_tenant_context()
+    entities = [str(e).upper() for e in body.pii_entities if str(e).strip()]
+    hit_count = max(body.pii_hit_count, len(entities))
+    event_type = (
+        AuditEventType.PII_DETECTED if hit_count > 0 else AuditEventType.PROMPT_SUBMITTED
+    )
+    masked = humanize_prompt_text(body.masked_content) or body.masked_content[:2000]
+    original = humanize_prompt_text(body.original_content) if body.original_content else None
+    if not original and hit_count == 0:
+        original = masked
+    event = AuditEvent(
+        id=uuid4(),
+        org_id=ctx.org_id,
+        event_type=event_type,
+        agent_id=ctx.agent_id,
+        masked_content=masked[:2000],
+        policy_action=PolicyAction.ALERT if hit_count > 0 else PolicyAction.ALLOW,
+        metadata_={
+            "provider": body.provider,
+            "model": body.model,
+            "pii_entities": entities,
+            "pii_hit_count": hit_count,
+            "source": body.source,
+            "inspect_only": True,
+            "original_content": (original[:2000] if original else None),
+        },
+    )
+    session.add(event)
+    await session.commit()
+    await session.refresh(event)
+    try:
+        await increment_prompt_usage(ctx.org_id)
+    except Exception:
+        logger.warning("web_audit_quota_increment_failed", org_id=str(ctx.org_id))
+    return WebAuditResponse(audit_event_id=event.id, event_type=event.event_type.value)
 
 
 @router.get("/updates/check", response_model=AgentUpdateCheckResponse)

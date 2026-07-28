@@ -14,13 +14,12 @@ Defense-in-depth tenant isolation:
 
 ## Quick Start
 
-```bash
-# Start infrastructure + API
-cd deploy
-docker compose up -d
+See **[docs/SETUP_LINUX_AND_WINDOWS.md](docs/SETUP_LINUX_AND_WINDOWS.md)** for the complete Linux and Windows setup guide.
 
-# API available at http://localhost:8000
-# Docs at http://localhost:8000/docs
+```bash
+# Start full stack (from repo root)
+make up
+# Kong API: http://localhost:8090  |  Dashboard: http://localhost:3000
 ```
 
 ### Default Platform Admin

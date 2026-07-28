@@ -22,17 +22,14 @@ from ai_spm.infrastructure.email.sender import send_verification_email, send_wel
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
+from ai_spm.services.pii_catalog import default_policy_rules
+
 # Model governance is opt-in: an empty allow list permits every model so the
 # gateway never blocks ordinary web-UI traffic (e.g. ChatGPT's "auto" model
 # router) before PII/threat scanning runs. Admins can populate `models.allowed`
-# later to restrict specific models. Security still enforces PII masking and
-# threat blocking by default.
-DEFAULT_POLICY_RULES = {
-    "models": {"allowed": []},
-    "pii": {"action": "mask", "entities": ["CNIC", "SSN", "CREDIT_CARD", "EMAIL", "PHONE"]},
-    "threats": {"action": "block", "threshold": 0.8},
-    "topics": {"blocked": []},
-}
+# later to restrict specific models. PII detections are per-entity toggles
+# under rules.pii.detections (enterprise detection policies).
+DEFAULT_POLICY_RULES = default_policy_rules()
 
 
 def slugify(name: str) -> str:

@@ -19,9 +19,11 @@ from ai_spm.core.schemas import (
     LLMConfigResponse,
     LoginRequest,
     OrgTokenRotateResponse,
+    PiiDetectionPolicyResponse,
     PolicyResponse,
     ThreatEventResponse,
     TokenResponse,
+    UpdatePiiDetectionRequest,
     UpdatePolicyRequest,
     UserResponse,
 )
@@ -34,6 +36,7 @@ from ai_spm.infrastructure.auth.password import (
 )
 from ai_spm.infrastructure.db.session import get_platform_session, get_session
 from ai_spm.services.audit_service import AuditService, GDPRService, hostname_map_for_agents
+from ai_spm.services.web_audit_text import humanize_prompt_text
 from ai_spm.services.dashboard_service import DashboardService
 from ai_spm.services.enrollment_service import enrollment_service, resolve_public_gateway_url
 from ai_spm.services.policy_engine import PolicyEngine
@@ -274,7 +277,14 @@ async def list_audit(
             agent_id=e.agent_id,
             hostname=hostnames.get(e.agent_id) if e.agent_id else None,
             provider=(e.metadata_ or {}).get("provider"),
-            masked_content=e.masked_content,
+            masked_content=humanize_prompt_text(e.masked_content) or e.masked_content,
+            original_content=humanize_prompt_text(
+                (e.metadata_ or {}).get("original_content")
+            )
+            or (e.metadata_ or {}).get("original_content"),
+            pii_entities=list((e.metadata_ or {}).get("pii_entities") or []),
+            pii_hit_count=int((e.metadata_ or {}).get("pii_hit_count") or 0),
+            source=(e.metadata_ or {}).get("source"),
             created_at=e.created_at,
         )
         for e in events
@@ -319,6 +329,43 @@ async def list_policies(session: AsyncSession = Depends(get_session)) -> list[Po
         select(Policy).where(Policy.org_id == ctx.org_id).order_by(Policy.created_at.desc())
     )
     return [PolicyResponse.model_validate(p) for p in result.scalars().all()]
+
+
+@router.get("/pii-detections", response_model=list[PiiDetectionPolicyResponse])
+async def list_pii_detections(
+    session: AsyncSession = Depends(get_session),
+) -> list[PiiDetectionPolicyResponse]:
+    """Enterprise PII detection policies — one toggleable card per entity."""
+    _require_permission("policies:read")
+    ctx = require_tenant_context()
+    rows = await policy_engine.list_pii_detection_policies(session, ctx.org_id)
+    return [PiiDetectionPolicyResponse.model_validate(r) for r in rows]
+
+
+@router.put("/pii-detections/{entity_id}", response_model=PiiDetectionPolicyResponse)
+async def update_pii_detection(
+    entity_id: str,
+    body: UpdatePiiDetectionRequest,
+    session: AsyncSession = Depends(get_session),
+) -> PiiDetectionPolicyResponse:
+    _require_permission("policies:write")
+    ctx = require_tenant_context()
+    try:
+        row = await policy_engine.set_pii_detection_enabled(
+            session, ctx.org_id, entity_id.upper(), body.enabled
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown PII detection '{entity_id}'",
+        ) from None
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    await session.commit()
+    return PiiDetectionPolicyResponse.model_validate(row)
 
 
 @router.post("/policies", response_model=PolicyResponse, status_code=status.HTTP_201_CREATED)

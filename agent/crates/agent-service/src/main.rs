@@ -187,10 +187,14 @@ async fn run_agent() -> Result<(), ServiceError> {
         }
     }
 
-    if config.local_api_enabled {
+    // Localhost bridge for web-MITM audit (+ legacy extension inspect). Always on
+    // when transparent MITM is enabled so ChatGPT web masks appear in Admin Audit.
+    let start_local_api = config.local_api_enabled || config.transparent_enabled;
+    if start_local_api {
         info!(
             listen = %config.local_api_listen,
-            "starting local inspection API (browser-extension endpoint for web-UI masking)"
+            legacy = config.local_api_enabled,
+            "starting local API (web-audit bridge on 127.0.0.1)"
         );
         let local_api_gateway = Arc::clone(&gateway);
         let local_api_listen = config.local_api_listen;
@@ -344,7 +348,7 @@ mod windows_svc {
                 internal_shutdown.clone(),
             )));
         }
-        if config.local_api_enabled {
+        if config.local_api_enabled || config.transparent_enabled {
             handles.push(tokio::spawn(run_local_api(
                 config.local_api_listen,
                 Arc::clone(&gateway),

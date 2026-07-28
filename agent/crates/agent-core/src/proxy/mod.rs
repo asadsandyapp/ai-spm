@@ -86,7 +86,7 @@ pub fn build_proxy_state(
     };
     info!(
         ?mitm_domains,
-        "MITM domain set — API traffic at network layer; web UIs via managed extension"
+        "MITM domain set — AI API hosts at network layer; CF web UIs via mitmproxy"
     );
     Ok(Arc::new(ProxyState {
         gateway,
@@ -365,6 +365,8 @@ pub fn ensure_crypto_provider() {
 }
 
 /// AI API hosts MITM-inspected at the network layer (SDKs, IDE tools, server apps).
+/// Consumer web UIs (ChatGPT/Claude/Gemini sites) use SPM-style mitmproxy instead —
+/// Rust MITM of those hosts triggers Cloudflare Turnstile.
 pub const DEFAULT_MITM_DOMAINS: &[&str] = &[
     "api.openai.com",
     "api.anthropic.com",
@@ -377,8 +379,8 @@ pub const DEFAULT_MITM_DOMAINS: &[&str] = &[
     "api.deepseek.com",
 ];
 
-/// Cloudflare-protected web UIs — passthrough at network layer so pages load.
-/// Prompt masking for these is handled by the IT-managed browser extension.
+/// Cloudflare-protected web UIs — passthrough in the Rust agent so pages load.
+/// Prompt masking for these is handled by mitmproxy (SPM-compatible path).
 pub const CLOUDFLARE_PROTECTED_AI_DOMAINS: &[&str] = &[
     "chatgpt.com",
     "chat.openai.com",
@@ -408,8 +410,7 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
-    /// Network MITM for API hosts only. Cloudflare web UIs passthrough so pages load;
-    /// the managed extension handles web-UI prompt masking in-page.
+    /// Network MITM for API hosts only. CF web UIs passthrough (masked via mitmproxy).
     pub fn should_mitm(&self, host: &str) -> bool {
         if host_matches_str(host, CLOUDFLARE_PROTECTED_AI_DOMAINS) {
             return false;

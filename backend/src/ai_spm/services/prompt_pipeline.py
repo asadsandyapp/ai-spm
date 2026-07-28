@@ -127,13 +127,14 @@ class PromptPipelineService:
                 "audit_event_id": event.id,
             }
 
-        # Step 6: PII scan + mask inbound
+        # Step 6: PII scan + mask inbound (respect org-enabled detection policies)
+        enabled_pii = await self.policy_engine.resolve_enabled_pii_entities(session, org_id)
         masked_messages: list[dict[str, str]] = []
         all_pii: list[str] = []
         try:
             for msg in messages:
                 content = msg.get("content", "")
-                result = self.pii_engine.scan_and_mask(content)
+                result = self.pii_engine.scan_and_mask(content, entities=enabled_pii)
                 all_pii.extend(result.entities)
                 masked_messages.append({**msg, "content": result.masked_text})
         except Exception as exc:
@@ -167,8 +168,10 @@ class PromptPipelineService:
                 PolicyAction.ALLOW if decision == PromptDecision.ALLOWED else PolicyAction.ALERT,
                 {
                     "pii_entities": list(set(all_pii)),
+                    "pii_hit_count": len(all_pii),
                     "provider": provider,
                     "model": model,
+                    "source": "agent_mitm",
                     "inspect_only": True,
                 },
             )
@@ -195,7 +198,9 @@ class PromptPipelineService:
 
         # Step 8: Response PII leakage scan
         try:
-            response_pii = self.pii_engine.scan_and_mask(response_content)
+            response_pii = self.pii_engine.scan_and_mask(
+                response_content, entities=enabled_pii
+            )
             if response_pii.entities:
                 response_content = response_pii.masked_text
                 all_pii = list(set(all_pii + response_pii.entities))

@@ -25,6 +25,7 @@ function toneFor(status: string): Tone {
     case "allowed":
       return "success";
     case "offline":
+    case "inactive":
     case "suspended":
     case "revoked":
     case "blocked":

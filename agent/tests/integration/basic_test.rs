@@ -13,6 +13,7 @@ fn mitm_domains_list_is_non_empty() {
 fn should_intercept_ai_api_hosts() {
     assert!(should_intercept("api.openai.com"));
     assert!(should_intercept("api.anthropic.com"));
+    assert!(!should_intercept("chatgpt.com"));
     assert!(!should_intercept("google.com"));
 }
 

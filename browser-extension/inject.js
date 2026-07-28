@@ -156,6 +156,9 @@
     }
 
     return (
+      // ChatGPT guest/unauth web (encrypts client-side — must intercept before send)
+      (u.includes("unauth-mweb") &&
+        (u.includes("conversation") || u.includes("prompt-autocomplete"))) ||
       // ChatGPT web UI (backend-api, backend-anon, /f/conversation, prepare)
       ((u.includes("/backend-api/") || u.includes("/backend-anon/")) &&
         (u.includes("conversation") || u.includes("completion") || u.includes("/f/"))) ||
@@ -594,12 +597,99 @@
     return null;
   }
 
+  // --- Guest ChatGPT: hook encrypt inputs (client encrypts before fetch) ---
+  const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+  function alreadyMasked(s) {
+    return /\*\*\*@\*\*\*|\[EMAIL|REDACTED/i.test(s);
+  }
+  function localMaskText(s) {
+    return String(s).replace(EMAIL_RE, "***@***.com");
+  }
+  function maskStringIfPii(s) {
+    if (!s || typeof s !== "string" || alreadyMasked(s)) return s;
+    const t = s.trim();
+    if (t.startsWith("gAAAAA") || (t.length > 800 && (t.startsWith("{") || t.startsWith("[")))) return s;
+    const out = localMaskText(s);
+    return out === s ? s : out;
+  }
+  try {
+    const origStringify = JSON.stringify;
+    JSON.stringify = function (value, replacer, space) {
+      const piiReplacer = (key, val) =>
+        typeof val === "string" ? maskStringIfPii(val) : val;
+      if (typeof replacer === "function") {
+        const userReplacer = replacer;
+        replacer = (key, val) => {
+          const out = userReplacer.call(this, key, val);
+          return typeof out === "string" ? maskStringIfPii(out) : out;
+        };
+      } else if (Array.isArray(replacer)) {
+        const allowed = replacer;
+        replacer = (key, val) => {
+          if (allowed.length && key !== "" && allowed.indexOf(key) < 0) return undefined;
+          return typeof val === "string" ? maskStringIfPii(val) : val;
+        };
+      } else {
+        replacer = piiReplacer;
+      }
+      return origStringify.call(this, value, replacer, space);
+    };
+  } catch (_) {}
+  try {
+    const origEncode = TextEncoder.prototype.encode;
+    TextEncoder.prototype.encode = function (input) {
+      if (typeof input === "string") input = maskStringIfPii(input);
+      return origEncode.call(this, input);
+    };
+  } catch (_) {}
+
+  // --- Guest ChatGPT composer mask (Firefox private / unauth-mweb encrypt path) ---
+  function maskGuestComposer() {
+    if (!isChatGPTPage()) return;
+    const el =
+      document.getElementById("prompt-textarea") ||
+      document.querySelector('[data-testid="composer"] [contenteditable="true"]') ||
+      document.querySelector("div.ProseMirror");
+    if (!el) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    let n;
+    let changed = false;
+    while ((n = walker.nextNode())) {
+      const v = n.nodeValue;
+      if (!v) continue;
+      const m = maskStringIfPii(v);
+      if (m === v) continue;
+      if (m !== v) {
+        n.nodeValue = m;
+        changed = true;
+      }
+    }
+    if (changed) {
+      try {
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertReplacementText" }));
+      } catch (_) {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  }
+  document.addEventListener("input", maskGuestComposer, true);
+  document.addEventListener("paste", maskGuestComposer, true);
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Enter" && !e.shiftKey) maskGuestComposer();
+    },
+    true,
+  );
+  setInterval(maskGuestComposer, 100);
+
   // --- fetch hook (ChatGPT / Claude / Gemini) ---
   const originalFetch = window.fetch;
   window.fetch = async function (input, init) {
     try {
       const url = typeof input === "string" ? input : input instanceof Request ? input.url : "";
       const method = (init && init.method) || (input instanceof Request ? input.method : "GET");
+      maskGuestComposer();
       let body = init && init.body != null ? init.body : null;
       if (body == null && input instanceof Request) {
         try {
@@ -645,6 +735,8 @@
     if (!shouldInspect(url, method) || body == null) {
       return origSend.apply(xhr, arguments);
     }
+
+    maskGuestComposer();
 
     (async () => {
       try {
