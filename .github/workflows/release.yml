@@ -1,12 +1,12 @@
 name: Release
 
-# Builds the production package the same way scripts/package-release.ps1
-# does locally (build -> cargo wix -> dist/ zip with install notes), then
-# attaches the resulting zip to a GitHub Release whenever a version tag is
-# pushed (e.g. v0.1.0 - match Cargo.toml's [workspace.package] version).
-# Reuses the exact same script as the manual/local path, so there's one
-# source of truth for how a release is assembled, not a second copy that
-# can drift.
+# Builds the production packages the same way scripts/package-release.ps1
+# (Windows, MSI) and scripts/package-release-linux.sh (Linux, .deb) do
+# locally, then attaches both resulting archives to a GitHub Release
+# whenever a version tag is pushed (e.g. v0.1.0 - match Cargo.toml's
+# [workspace.package] version). Reuses the exact same scripts as the
+# manual/local path, so there's one source of truth for how each release
+# artifact is assembled, not a second copy that can drift.
 on:
   push:
     tags:
@@ -16,8 +16,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish release
+  release-windows:
+    name: Build and publish Windows release
     runs-on: windows-latest
 
     steps:
@@ -65,3 +65,31 @@ jobs:
           # commit/PR list is appended below it via generate_release_notes.
           body_path: packaging/RELEASE-NOTES.md
           generate_release_notes: true
+
+  release-linux:
+    name: Build and publish Linux release
+    # Runs after release-windows so both jobs upload to the same release
+    # (created by release-windows) instead of racing to create it twice;
+    # only release-windows sets body/generate_release_notes.
+    needs: release-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build and package release
+        run: ./scripts/package-release-linux.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AI-SPM-DLP-Agent-linux-*.tar.gz

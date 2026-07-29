@@ -1,7 +1,9 @@
 name: CI
 
-# This project is Windows-only (Win32 APIs, x86_64-pc-windows-msvc target),
-# so CI runs on windows-latest rather than the usual ubuntu default.
+# Windows (Win32 APIs, x86_64-pc-windows-msvc) and Linux (Debian/Ubuntu
+# packaging, x86_64-unknown-linux-gnu) are both supported - see
+# crates/agent-ca and crates/agent-sysnet for the platform-specific bits,
+# and packaging/linux/ for the .deb install path.
 on:
   push:
     branches: ["rust"]
@@ -11,20 +13,22 @@ on:
 jobs:
   test:
     name: Build & test
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
 
       - name: Install NASM
         # Build-time dependency of the TLS/crypto stack (aws-lc-rs, pulled
-        # in via rustls) - not preinstalled on the windows-latest runner
-        # image, unlike CMake, which already is.
+        # in via rustls) on Windows - not preinstalled on the windows-latest
+        # runner image, unlike CMake, which already is.
+        if: runner.os == 'Windows'
         uses: ilammy/setup-nasm@v1
 
       - name: Cache cargo registry and build output

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Debian maintainer script: runs after files are laid down. Keeps the Rust
+# `agentctl install --full` code as the one source of truth for "what a
+# production install does" - same pattern as the Windows MSI's custom action
+# calling agentctl.exe install --full, so there's no second copy of this
+# logic to drift out of sync.
+set -e
+
+case "$1" in
+    configure)
+        mkdir -p /var/lib/ai-spm-dlp-agent /var/log/ai-spm-dlp-agent
+        /usr/bin/agentctl install --full --config /etc/ai-spm-dlp-agent/config.toml
+        ;;
+esac
+
+exit 0

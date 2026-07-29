@@ -26,11 +26,14 @@ pub enum CaError {
     #[error("rcgen error: {0}")]
     Rcgen(#[from] rcgen::Error),
 
+    #[error("failed to parse existing policies.json: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[cfg(windows)]
     #[error("windows trust store error: {0}")]
     Windows(#[from] windows::core::Error),
 
-    #[cfg(windows)]
-    #[error("failed to parse existing policies.json: {0}")]
-    Json(#[from] serde_json::Error),
+    #[cfg(target_os = "linux")]
+    #[error("`{command}` failed: {reason}")]
+    Command { command: String, reason: String },
 }

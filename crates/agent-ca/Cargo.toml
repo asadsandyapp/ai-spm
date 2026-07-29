@@ -9,10 +9,10 @@ authors.workspace = true
 rcgen = { workspace = true }
 time = { version = "0.3", features = ["std"] }
 thiserror = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Security_Cryptography",
     "Win32_Foundation",
 ] }
-serde_json = { workspace = true }

@@ -30,10 +30,28 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Plain foreground mode: unchanged from before the Windows Service work -
-/// still what `cargo run --bin agentd` / manual dev use goes through.
+/// still what `cargo run --bin agentd` / manual dev use goes through, and
+/// (on Linux) what systemd runs directly as `Type=simple`.
 fn run_console(config_path: PathBuf) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(agent::runtime::run_agent(config_path, async {
-        let _ = tokio::signal::ctrl_c().await;
-    }))
+    runtime.block_on(agent::runtime::run_agent(config_path, shutdown_signal()))
+}
+
+/// `systemctl stop` sends SIGTERM, whose default disposition is immediate
+/// process termination - without an explicit handler, hudsucker's graceful
+/// shutdown would never get a chance to run under systemd. Ctrl+C (SIGINT)
+/// is kept too for interactive dev use.
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = sigterm.recv() => {},
+    }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }

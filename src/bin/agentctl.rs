@@ -28,12 +28,12 @@ enum Command {
     DisableProxy,
     /// Print the current config and CA/policy state.
     Status,
-    /// Full production install: CA into the Local Machine Trusted Root
-    /// store, Firefox enterprise trust, and `agentd` registered as an
-    /// auto-start Windows Service with crash-restart recovery actions.
-    /// Requires an elevated process. This is what the MSI installer's
-    /// custom action runs - the granular subcommands above stay as they
-    /// were for dev/test/troubleshooting.
+    /// Full production install: CA into the system-wide trust store,
+    /// Firefox enterprise trust, and `agentd` registered as an auto-start
+    /// background service (a Windows Service, or a systemd unit on Linux)
+    /// with crash-restart recovery. Requires an elevated/root process. This
+    /// is what the MSI/`.deb` installer runs - the granular subcommands
+    /// above stay as they were for dev/test/troubleshooting.
     Install {
         /// Perform the full production install. Currently the only
         /// supported mode - the flag exists so the installer's invocation
@@ -42,10 +42,10 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
-    /// Undo `install --full`: stop and remove the Windows Service, and
-    /// best-effort remove the Local Machine CA certificate. Requires an
-    /// elevated process. Per-user state from `enable-proxy` is untouched -
-    /// each user should run `disable-proxy` themselves first.
+    /// Undo `install --full`: stop and remove the background service, and
+    /// best-effort remove the system-wide CA certificate. Requires an
+    /// elevated/root process. Per-user state from `enable-proxy` is
+    /// untouched - each user should run `disable-proxy` themselves first.
     Uninstall,
 }
 
@@ -89,11 +89,28 @@ fn install_ca(config: &AgentConfig) -> anyhow::Result<()> {
         install_firefox_trust();
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        match agent_ca::install_root_cert(&generated.cert_pem, agent_ca::StoreScope::CurrentUser) {
+            Ok(()) => println!(
+                "Installed AI-SPM DLP Agent CA into your user NSS database (~/.pki/nssdb) - this covers \
+                 Chrome/Chromium for your account. Certificate: {}\nFirefox trust and system-wide coverage \
+                 need `agentctl install --full` (run as root).",
+                config.ca.cert_path.display()
+            ),
+            Err(err) => println!(
+                "Could not install into ~/.pki/nssdb ({err}). This usually means `certutil` isn't \
+                 installed - run `sudo apt install libnss3-tools` and try again, or use `sudo agentctl \
+                 install --full` for a system-wide install instead."
+            ),
+        }
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = &generated;
         println!(
-            "CA generated at {}, but trust-store install is only implemented on Windows.",
+            "CA generated at {}, but trust-store install is only implemented on Windows and Linux.",
             config.ca.cert_path.display()
         );
     }
@@ -101,13 +118,16 @@ fn install_ca(config: &AgentConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Firefox ignores the Windows certificate stores, so `install_root_cert`
-/// above has no effect on it. Set the `ImportEnterpriseRoots` enterprise
-/// policy on every Firefox install found so it trusts the OS stores
-/// instead - see `agent_ca::firefox` for why. Best-effort: a Firefox that
-/// isn't found or can't be written to (machine-wide install, no admin) is
-/// reported but doesn't fail `install-ca` for everything else.
-#[cfg(windows)]
+/// Firefox ignores the OS certificate stores, so `install_root_cert` above
+/// has no effect on it. Set the `ImportEnterpriseRoots` enterprise policy on
+/// every Firefox install found so it trusts the OS stores instead - see
+/// `agent_ca::firefox` for why. Best-effort: a Firefox that isn't found or
+/// can't be written to (machine-wide install, no admin) is reported but
+/// doesn't fail the caller for everything else. Only called from the
+/// elevated/root `install --full` path - on Linux, Firefox's system-wide
+/// `policies.json` locations need root, so there's no equivalent call from
+/// the no-root granular `install-ca` path (unlike Windows, where it's called
+/// from both - see `install_ca` below).
 fn install_firefox_trust() {
     let install_dirs = agent_ca::firefox::find_install_dirs();
     if install_dirs.is_empty() {
@@ -168,11 +188,31 @@ fn enable_proxy(config: &AgentConfig) -> anyhow::Result<()> {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        println!(
+            "PAC written to {} and served at {} (start agentd if it isn't running).\n\
+             Linux has no single system-wide proxy auto-config API, so this needs a manual, \
+             per-desktop step - pick whichever applies to you:\n\
+             \n\
+             \x20 Firefox: Settings -> General -> Network Settings -> Settings... -> \"Automatic \
+             proxy configuration URL\", paste the PAC URL above, OK.\n\
+             \x20 GNOME (covers Chrome/Chromium and other GTK apps that follow the desktop proxy \
+             setting): Settings -> Network -> Network Proxy -> Automatic, paste the PAC URL above.\n\
+             \n\
+             Then restart your browser. Only {:?} will route through the agent; everything else \
+             stays DIRECT. Run `agentctl disable-proxy` for the steps to revert.",
+            abs_path.display(),
+            pac_url,
+            config.targets.domains,
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = &pac_url;
         println!(
-            "PAC file written to {}, but system proxy configuration is only implemented on Windows.",
+            "PAC file written to {}, but system proxy configuration is only implemented on Windows and Linux.",
             abs_path.display()
         );
     }
@@ -187,9 +227,19 @@ fn disable_proxy() -> anyhow::Result<()> {
         println!("Disabled: proxy auto-config cleared. Restart your browser to pick up the change.");
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        println!("System proxy configuration is only implemented on Windows; nothing to disable.");
+        println!(
+            "Nothing to clear automatically on Linux - revert whichever manual step `enable-proxy` \
+             had you do: Firefox -> Settings -> General -> Network Settings -> switch off \"Automatic \
+             proxy configuration URL\"; GNOME -> Settings -> Network -> Network Proxy -> switch to \
+             \"Off\". Then restart your browser."
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        println!("System proxy configuration is only implemented on Windows and Linux; nothing to disable.");
     }
 
     Ok(())
@@ -244,10 +294,27 @@ fn install_full(config: &AgentConfig, config_path: &Path, full: bool) -> anyhow:
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = config_path; // the systemd unit already hardcodes its own config path
+        agent_ca::install_root_cert(&generated.cert_pem, agent_ca::StoreScope::LocalMachine)
+            .context("installing CA into the system trust store (this requires root)")?;
+        println!("Installed AI-SPM DLP Agent CA into the system trust store (update-ca-certificates).");
+
+        install_firefox_trust();
+
+        agent::systemd::install().context("enabling the ai-spm-dlp-agent systemd service")?;
+        println!("Enabled and started the 'ai-spm-dlp-agent' systemd service (auto-start, restart on failure).");
+        println!(
+            "Each user still needs to run `agentctl enable-proxy` once (no root required) to point \
+             their own browser at the agent."
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (&generated, config_path);
-        println!("Full install is only implemented on Windows.");
+        println!("Full install is only implemented on Windows and Linux.");
     }
 
     Ok(())
@@ -288,9 +355,33 @@ fn uninstall_full() -> anyhow::Result<()> {
         );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        println!("Uninstall is only implemented on Windows.");
+        match agent::systemd::uninstall() {
+            Ok(()) => println!("Stopped and disabled the 'ai-spm-dlp-agent' systemd service."),
+            Err(err) => println!(
+                "Could not disable the systemd service ({err}); it may not be installed, or this \
+                 process isn't root."
+            ),
+        }
+
+        match agent_ca::remove_root_cert(agent_ca::COMMON_NAME, agent_ca::StoreScope::LocalMachine) {
+            Ok(count) if count > 0 => println!("Removed the CA certificate from the system trust store."),
+            Ok(_) => println!(
+                "No matching CA certificate found in the system trust store (already removed)."
+            ),
+            Err(err) => println!("Could not remove the CA certificate ({err})."),
+        }
+
+        println!(
+            "Note: any user who ran `enable-proxy` should revert their manual browser proxy setting \
+             themselves first - per-user settings aren't touched by an elevated uninstall."
+        );
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        println!("Uninstall is only implemented on Windows and Linux.");
     }
 
     Ok(())

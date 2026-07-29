@@ -1,0 +1,16 @@
+#!/bin/sh
+# Debian maintainer script: runs before files are removed, so /usr/bin/
+# agentctl and /usr/bin/agentd still exist here - this is the last point at
+# which `agentctl uninstall` (stop+disable the systemd unit, remove the CA
+# from the system trust store) can actually run. Only on a real removal, not
+# an upgrade (an upgrade's postinst re-runs `install --full`, which restarts
+# the service with the new binary - see src/systemd.rs).
+set -e
+
+case "$1" in
+    remove)
+        /usr/bin/agentctl uninstall || true
+        ;;
+esac
+
+exit 0

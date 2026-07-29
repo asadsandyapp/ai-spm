@@ -1,0 +1,32 @@
+[proxy]
+listen_addr = "127.0.0.1"
+listen_port = 8443
+max_body_bytes = 10_485_760
+on_oversized = "log"
+
+[ca]
+cert_path = "/var/lib/ai-spm-dlp-agent/ca/root.crt"
+key_path = "/var/lib/ai-spm-dlp-agent/ca/root.key"
+
+[targets]
+domains = [
+    "chat.openai.com",
+    "chatgpt.com",
+    "api.openai.com",
+    "claude.ai",
+    "api.anthropic.com",
+    "gemini.google.com",
+    "generativelanguage.googleapis.com",
+    "bard.google.com",
+]
+
+[policy]
+source = "/etc/ai-spm-dlp-agent/policies/default.toml"
+
+[logging]
+level = "info"
+file_dir = "/var/log/ai-spm-dlp-agent"
+
+[sysnet]
+pac_path = "/var/lib/ai-spm-dlp-agent/proxy.pac"
+pac_port = 8444

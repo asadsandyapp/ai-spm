@@ -1,0 +1,15 @@
+#!/bin/sh
+# Debian maintainer script: runs after files (including /usr/bin/agentctl)
+# are already gone, so this only cleans up state left on disk - the actual
+# service-stop/CA-removal work happens in `prerm` while agentctl still
+# exists. Best-effort: a purge that fails partway through should still
+# remove the package, not abort dpkg.
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /var/lib/ai-spm-dlp-agent /var/log/ai-spm-dlp-agent
+        ;;
+esac
+
+exit 0

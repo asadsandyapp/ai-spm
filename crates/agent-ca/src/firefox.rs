@@ -28,6 +28,7 @@ use crate::error::CaError;
 /// then the two machine-wide `Program Files` locations. Installs that were
 /// never registered with Windows (e.g. an extracted zip) aren't found -
 /// this only covers the standard installer layouts.
+#[cfg(windows)]
 pub fn find_install_dirs() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
@@ -44,6 +45,37 @@ pub fn find_install_dirs() -> Vec<PathBuf> {
     candidates
         .into_iter()
         .filter(|dir| dir.join("firefox.exe").is_file())
+        .collect()
+}
+
+/// Return every Firefox installation directory found on this machine.
+///
+/// Checks the standard Debian/Ubuntu package install locations, plus
+/// whatever `firefox` resolves to on `PATH` (covers non-standard installs).
+/// A Flatpak/Snap Firefox is sandboxed and doesn't read `distribution/
+/// policies.json` the same way, so it isn't covered here.
+#[cfg(target_os = "linux")]
+pub fn find_install_dirs() -> Vec<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from("/usr/lib/firefox"),
+        PathBuf::from("/usr/lib64/firefox"),
+        PathBuf::from("/opt/firefox"),
+    ];
+
+    if let Ok(output) = std::process::Command::new("which").arg("firefox").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Ok(resolved) = std::fs::canonicalize(&path) {
+                if let Some(dir) = resolved.parent() {
+                    candidates.push(dir.to_path_buf());
+                }
+            }
+        }
+    }
+
+    candidates
+        .into_iter()
+        .filter(|dir| dir.join("firefox").is_file())
         .collect()
 }
 

@@ -47,6 +47,28 @@ tracing-appender = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.7"
 
+# Debian packaging metadata for `cargo deb` - see scripts/package-release-linux.sh
+# and packaging/linux/. Mirrors what the WiX config (wix/main.wxs) does for
+# the MSI: lay down the two binaries, the default config/policy, and wire up
+# the production install/uninstall via maintainer scripts that shell out to
+# `agentctl` (see packaging/linux/postinst and prerm).
+[package.metadata.deb]
+name = "ai-spm-dlp-agent"
+depends = "ca-certificates"
+recommends = "libnss3-tools"
+maintainer-scripts = "packaging/linux"
+assets = [
+    ["target/release/agentd", "usr/bin/", "755"],
+    ["target/release/agentctl", "usr/bin/", "755"],
+    ["packaging/linux/ai-spm-dlp-agent.service", "lib/systemd/system/", "644"],
+    ["packaging/linux/config.toml", "etc/ai-spm-dlp-agent/config.toml", "644"],
+    ["policies/default.toml", "etc/ai-spm-dlp-agent/policies/default.toml", "644"],
+]
+conf-files = [
+    "/etc/ai-spm-dlp-agent/config.toml",
+    "/etc/ai-spm-dlp-agent/policies/default.toml",
+]
+
 [workspace.dependencies]
 agent-core = { path = "crates/agent-core" }
 agent-ca = { path = "crates/agent-ca" }
