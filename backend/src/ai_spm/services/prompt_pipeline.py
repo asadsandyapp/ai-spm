@@ -305,12 +305,20 @@ class AgentService:
         org_token: str,
         org_token_hash: str,
         cert_fingerprint: str | None = None,
-    ) -> Agent | None:
-        from ai_spm.infrastructure.auth.password import hash_token
+    ) -> tuple[Agent, str] | None:
+        """Returns (agent, session_token) - the plaintext token is shown to
+        the caller exactly once, here, then only ever compared by hash (see
+        tenant/middleware.py::_verify_agent_session_token). A fresh token is
+        issued on every call, including idempotent re-registration, since
+        that's the only channel this token is ever handed out on."""
+        from ai_spm.infrastructure.auth.password import generate_token, hash_token
         from ai_spm.tenant.quota import QuotaExceededError, check_agent_quota
 
         if hash_token(org_token) != org_token_hash:
             return None
+
+        session_token = generate_token(48)
+        session_token_hash = hash_token(session_token)
 
         # Idempotent re-registration: reinstalling the agent on the same machine
         # (same org + hostname) must reuse the existing record instead of creating
@@ -329,11 +337,12 @@ class AgentService:
             existing.agent_version = agent_version
             existing.status = AgentStatus.ONLINE
             existing.last_heartbeat_at = datetime.now(UTC)
+            existing.session_token_hash = session_token_hash
             if cert_fingerprint:
                 existing.cert_fingerprint = cert_fingerprint
             await session.commit()
             await session.refresh(existing)
-            return existing
+            return existing, session_token
 
         try:
             await check_agent_quota(org_id)
@@ -348,11 +357,12 @@ class AgentService:
             status=AgentStatus.ONLINE,
             last_heartbeat_at=datetime.now(UTC),
             cert_fingerprint=cert_fingerprint,
+            session_token_hash=session_token_hash,
         )
         session.add(agent)
         await session.commit()
         await session.refresh(agent)
-        return agent
+        return agent, session_token
 
     async def heartbeat(self, session: AsyncSession, org_id: UUID, agent_id: UUID) -> str:
         """Return 'ok', 'revoked', or 'missing' so callers can respond precisely.

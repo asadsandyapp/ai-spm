@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-TenantAuthSource = Literal["jwt", "mtls", "internal"]
+TenantAuthSource = Literal["jwt", "mtls", "session_token", "org_token", "internal"]
 
 
 @dataclass(frozen=True, slots=True)
