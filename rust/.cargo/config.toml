@@ -1,0 +1,7 @@
+# Statically link the MSVC C runtime so `agentd.exe`/`agentctl.exe` don't
+# need `vcruntime140.dll` at runtime. Without this, a machine without the
+# Visual C++ Redistributable installed (the common case for a fresh desktop
+# the MSI installer targets) fails to launch either binary - see README's
+# "Prerequisites"/"Build" notes and ROADMAP.md's install/packaging item.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

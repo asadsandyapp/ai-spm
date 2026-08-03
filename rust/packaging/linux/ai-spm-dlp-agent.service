@@ -1,0 +1,13 @@
+[Unit]
+Description=AI-SPM DLP Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/agentd --config /etc/ai-spm-dlp-agent/config.toml
+WorkingDirectory=/var/lib/ai-spm-dlp-agent
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

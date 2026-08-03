@@ -1,0 +1,92 @@
+AI-SPM DLP Agent — Install Notes (Linux)
+=========================================
+
+What this is
+------------
+A local Linux agent that watches your traffic to AI chat sites (ChatGPT,
+Claude, Gemini) and masks or blocks sensitive data (card numbers, CNICs,
+SSNs, emails, API keys, etc.) before it leaves your machine. Everything else
+you browse is untouched — only the configured AI-service domains are ever
+routed through it.
+
+IMPORTANT — please read before installing
+-------------------------------------------
+Installing this means the agent decrypts your traffic to the configured AI
+sites in order to scan it (it does not read anything else). Only install
+this if you've been asked to by your organization, or you understand and
+accept that trade-off yourself.
+
+Requirements
+------------
+- Debian or Ubuntu (or a derivative), 64-bit.
+- root (via sudo) — the package install needs it once to set itself up.
+  Nothing after that requires root.
+
+Step 1: Install
+----------------
+1. Run:
+
+    sudo apt install ./ai-spm-dlp-agent_0.1.0_amd64.deb
+
+2. The package installs quietly and finishes in a few seconds. It:
+     - Installs the agent to /usr/bin/agentd and /usr/bin/agentctl
+     - Generates a local certificate and adds it to the system trust store
+       (needed to inspect HTTPS traffic to the AI sites — it does NOT affect
+       any other website). On Debian/Ubuntu this also covers Chrome/Chromium.
+     - Sets up Firefox trust automatically, if Firefox is installed
+     - Enables and starts a systemd service ("ai-spm-dlp-agent") that runs
+       quietly in the background from now on (auto-starts on boot, restarts
+       itself if it ever crashes)
+
+Step 2: One command, per user (no root needed)
+--------------------------------------------------
+The install above sets up the machine, but pointing YOUR browser at the
+agent is a personal setting each user has to do for themselves once:
+
+    agentctl enable-proxy
+
+This prints the PAC URL and the exact steps for your browser/desktop
+(Firefox has its own setting; GNOME's system proxy setting covers
+Chrome/Chromium and other GTK apps). Follow whichever applies to you, then
+restart your browser.
+
+If more than one person uses this machine, each person runs that same one
+command for their own account.
+
+Step 3: Check it worked
+-------------------------
+Open ChatGPT, Claude, or Gemini in your browser and send a message containing
+something like a fake card number, e.g.:
+
+    my card is 4111 1111 1111 1111
+
+It should arrive at the AI service as something like:
+
+    my card is [MASKED-CC-001]
+
+If you'd rather not test with real chat content, that's fine — the agent is
+already protecting you in the background either way.
+
+Uninstalling
+------------
+    sudo apt purge ai-spm-dlp-agent
+
+This stops and disables the systemd service and removes the CA from the
+system trust store. If you ran "enable-proxy" (Step 2), first revert
+whatever manual browser/desktop setting you configured, then restart your
+browser.
+
+Troubleshooting
+---------------
+- Browser shows a certificate warning: make sure you restarted the browser
+  after Step 2, and that Step 1 actually completed — check
+  `systemctl status ai-spm-dlp-agent` (should show "active (running)").
+- Nothing gets masked: confirm you ran `agentctl enable-proxy` and completed
+  the manual browser/desktop step, and restarted the browser afterward.
+- Service not running / crashed: it auto-restarts after about 30 seconds
+  (`systemctl status ai-spm-dlp-agent` to check). If it's missing entirely,
+  re-run `sudo apt install --reinstall ai-spm-dlp-agent`.
+
+Questions
+---------
+Contact Nabeel Qadri (nabeel.qadri@sandyapps.co) with any issues.

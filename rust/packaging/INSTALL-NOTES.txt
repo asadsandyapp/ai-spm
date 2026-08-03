@@ -1,0 +1,95 @@
+AI-SPM DLP Agent — Install Notes
+=================================
+
+What this is
+------------
+A local Windows agent that watches your traffic to AI chat sites (ChatGPT,
+Claude, Gemini) and masks or blocks sensitive data (card numbers, CNICs,
+SSNs, emails, API keys, etc.) before it leaves your machine. Everything else
+you browse is untouched — only the configured AI-service domains are ever
+routed through it.
+
+IMPORTANT — please read before installing
+-------------------------------------------
+Installing this means the agent decrypts your traffic to the configured AI
+sites in order to scan it (it does not read anything else). Only install
+this if you've been asked to by your organization, or you understand and
+accept that trade-off yourself.
+
+Requirements
+------------
+- Windows 10 or 11, 64-bit.
+- Local administrator rights (or someone who has them) — the installer needs
+  ONE admin approval to set itself up. Nothing after that requires admin.
+
+Step 1: Install
+----------------
+1. Double-click "agent-0.1.0-x86_64.msi".
+2. Windows will likely show a blue "Windows protected your PC" SmartScreen
+   warning. This is expected — the installer isn't code-signed yet.
+   Click "More info", then "Run anyway".
+3. Approve the Administrator/UAC prompt that follows.
+4. The installer runs silently and finishes in a few seconds. It:
+     - Installs the agent to C:\Program Files\agent\bin
+     - Generates and trusts a local certificate (needed to inspect HTTPS
+       traffic to the AI sites — it does NOT affect any other website)
+     - Sets up Firefox trust automatically, if Firefox is installed
+     - Registers and starts a Windows Service that runs quietly in the
+       background from now on (auto-starts on reboot, restarts itself if it
+       ever crashes)
+   Your antivirus/security software may flag or ask about it during this
+   step, since it behaves like a local proxy tool — that's expected;
+   approve/allow it if prompted.
+
+Step 2: One command, per user (no admin needed)
+--------------------------------------------------
+The install above sets up the machine, but pointing YOUR browser at the
+agent is a personal setting each Windows user has to do for themselves once:
+
+  Open PowerShell (no need to run as Administrator) and run:
+
+    "C:\Program Files\agent\bin\agentctl.exe" enable-proxy
+
+Then restart your browser (Chrome, Edge, or Firefox).
+
+If more than one person uses this PC, each person logs in and runs that same
+one command for their own account.
+
+Step 3: Check it worked
+-------------------------
+Open ChatGPT, Claude, or Gemini in your browser and send a message containing
+something like a fake card number, e.g.:
+
+    my card is 4111 1111 1111 1111
+
+It should arrive at the AI service as something like:
+
+    my card is [MASKED-CC-001]
+
+If you'd rather not test with real chat content, that's fine — the agent is
+already protecting you in the background either way.
+
+Uninstalling
+------------
+Go to Settings -> Apps -> installed apps, find "agent", and uninstall it —
+this removes the Windows Service and the certificate. If you ran
+"enable-proxy" (Step 2), first run this to undo it:
+
+    "C:\Program Files\agent\bin\agentctl.exe" disable-proxy
+
+Then restart your browser.
+
+Troubleshooting
+---------------
+- Browser shows a certificate warning: make sure you restarted the browser
+  after Step 2, and that the install in Step 1 actually completed (check
+  Services for "AI-SPM DLP Agent" — it should show as Running).
+- Nothing gets masked: confirm you ran the "enable-proxy" command in Step 2
+  for the Windows account you're actually using, and restarted the browser
+  afterward.
+- Service not running / crashed: it's set to auto-restart within about 30
+  seconds. If it's missing entirely from Services, re-run the installer.
+
+Questions
+---------
+Contact Nabeel Qadri (nabeel.qadri@sandyapps.co) with any issues.

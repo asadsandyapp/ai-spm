@@ -1,0 +1,19 @@
+[package]
+name = "agent-proxy"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+agent-core = { workspace = true }
+agent-dlp = { workspace = true }
+hudsucker = { workspace = true }
+http = "1"
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
