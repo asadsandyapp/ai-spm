@@ -20,6 +20,11 @@ agent/target/
 !.env.example
 *.key
 *.pem
+# Dev CA state generated at runtime by CertService (cert_service.py) - .key/
+# .pem are already covered above, but the issued certs + openssl serial file
+# aren't, and this dir isn't meant to be checked in at all.
+infrastructure/certs/issued/
+infrastructure/certs/*.srl
 
 # Build output
 dist/

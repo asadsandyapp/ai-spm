@@ -41,23 +41,79 @@ def _is_public_path(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
 
-def _extract_org_from_mtls_headers(request: Request) -> tuple[UUID, UUID | None] | None:
-    org_header = request.headers.get("X-Org-ID")
-    agent_header = request.headers.get("X-Agent-ID")
+def _extract_org_from_spiffe_san(request: Request) -> tuple[UUID, UUID] | None:
+    """Real mTLS path: trusts X-Client-Cert-SAN only when it's actually been
+    set by a gateway that verified the client certificate. Nothing in this
+    repo's deployment does that yet (no Kong mTLS plugin is configured), so
+    this is currently dead in practice - kept so a future real mTLS rollout
+    is a config change, not a code change."""
     spiffe_uri = request.headers.get("X-Client-Cert-SAN") or request.headers.get(
         "X-Forwarded-Client-Cert-SAN"
     )
+    if not spiffe_uri:
+        return None
+    match = SPIFFE_ORG_PATTERN.search(spiffe_uri)
+    if not match:
+        return None
+    return UUID(match.group(1)), UUID(match.group(2))
 
-    if spiffe_uri:
-        match = SPIFFE_ORG_PATTERN.search(spiffe_uri)
-        if match:
-            return UUID(match.group(1)), UUID(match.group(2))
 
+def _extract_bare_org_header(request: Request) -> UUID | None:
+    """/register only: there's no session token yet to check (this call is
+    what issues one), so the org_id header is accepted at face value here -
+    the real secret check is register_agent's org_token vs. org_token_hash
+    comparison, deeper in the request. Every other /agent/v1/* endpoint must
+    go through _verify_agent_session_token instead."""
+    org_header = request.headers.get("X-Org-ID")
     if org_header and UUID_PATTERN.match(org_header):
-        agent_id = UUID(agent_header) if agent_header and UUID_PATTERN.match(agent_header) else None
-        return UUID(org_header), agent_id
-
+        return UUID(org_header)
     return None
+
+
+async def _verify_agent_session_token(request: Request) -> tuple[UUID, UUID] | None:
+    """The actual authentication check for every /agent/v1/* endpoint other
+    than /register: requires X-Org-ID + X-Agent-ID + a bearer token that
+    hashes to the specific agent's stored session_token_hash (issued once at
+    registration - see AgentService.register). Closes the previous gap
+    where those two UUID headers alone, with no secret, were trusted.
+
+    Looking the Agent row up here is also the natural place to reject a
+    revoked agent on every authenticated call, not just heartbeat."""
+    org_header = request.headers.get("X-Org-ID")
+    agent_header = request.headers.get("X-Agent-ID")
+    auth_header = request.headers.get("Authorization", "")
+
+    if not (org_header and UUID_PATTERN.match(org_header)):
+        return None
+    if not (agent_header and UUID_PATTERN.match(agent_header)):
+        return None
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    if not token:
+        return None
+
+    org_id, agent_id = UUID(org_header), UUID(agent_header)
+
+    from ai_spm.domain.enums import AgentStatus
+    from ai_spm.domain.models import Agent
+    from ai_spm.infrastructure.auth.password import hash_token
+
+    # All attribute access on `agent` must happen before the session context
+    # exits - accessing it afterward on a detached instance raises
+    # DetachedInstanceError (caught this via a real test run, not by
+    # inspection: get_platform_session() expires instances on scope exit).
+    async with get_platform_session() as session:
+        result = await session.execute(
+            select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+        )
+        agent = result.scalar_one_or_none()
+        if agent is None or agent.status == AgentStatus.REVOKED:
+            return None
+        if not agent.session_token_hash or hash_token(token) != agent.session_token_hash:
+            return None
+
+    return org_id, agent_id
 
 
 def _extract_org_from_jwt(request: Request) -> tuple[UUID, UUID, frozenset[str]] | None:
@@ -106,14 +162,29 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         ctx: TenantContext | None = None
 
         if path.startswith("/agent/v1/"):
-            mtls_data = _extract_org_from_mtls_headers(request)
-            if not mtls_data:
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Missing or invalid mTLS tenant context"},
-                )
-            org_id, agent_id = mtls_data
-            ctx = TenantContext(org_id=org_id, auth_source="mtls", agent_id=agent_id)
+            spiffe_data = _extract_org_from_spiffe_san(request)
+            if spiffe_data:
+                org_id, agent_id = spiffe_data
+                ctx = TenantContext(org_id=org_id, auth_source="mtls", agent_id=agent_id)
+            elif path == "/agent/v1/register":
+                # No session token exists yet - org_token (checked deeper in
+                # register_agent) is the real credential for this one call.
+                bare_org_id = _extract_bare_org_header(request)
+                if bare_org_id is None:
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"detail": "Missing or invalid X-Org-ID"},
+                    )
+                ctx = TenantContext(org_id=bare_org_id, auth_source="org_token", agent_id=None)
+            else:
+                session_data = await _verify_agent_session_token(request)
+                if session_data is None:
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"detail": "Missing or invalid agent session token"},
+                    )
+                org_id, agent_id = session_data
+                ctx = TenantContext(org_id=org_id, auth_source="session_token", agent_id=agent_id)
 
         elif path.startswith("/admin/v1/"):
             jwt_data = _extract_org_from_jwt(request)

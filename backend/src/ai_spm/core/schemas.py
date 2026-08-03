@@ -91,6 +91,10 @@ class AgentRegisterWithCertResponse(AgentResponse):
     private_key_pem: str
     ca_certificate_pem: str
     cert_expires_at: str
+    # Bearer token for every subsequent /agent/v1/* call (heartbeat, prompt,
+    # web-audit, ...) - shown once, like OrgTokenRotateResponse.org_token.
+    # See tenant/middleware.py::_verify_agent_session_token.
+    session_token: str
 
 
 class AgentUpdateCheckResponse(BaseModel):
