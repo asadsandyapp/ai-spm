@@ -15,4 +15,7 @@ pub enum CoreError {
         #[source]
         source: toml::de::Error,
     },
+
+    #[error("invalid install token: {reason}")]
+    InvalidInstallToken { reason: String },
 }

@@ -28,3 +28,11 @@ source = "policies/default.toml"
 [logging]
 level = "info"
 file_dir = "logs"
+
+# Cloud fleet registration - optional. Leave commented out for a fully
+# standalone agent (the default). Set both fields to register this agent
+# with the AI-SPM control-plane using the company install token an admin
+# distributes (see README.md's "Cloud registration" section).
+# [cloud]
+# gateway_url = "https://gateway.example.com"
+# install_token = "<org_id>.<secret>"

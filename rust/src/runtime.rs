@@ -60,6 +60,12 @@ pub async fn run_agent(
     let pac_addr = SocketAddr::new(ip, config.sysnet.pac_port);
     tokio::spawn(serve_pac(pac, pac_addr));
 
+    if config.cloud.is_configured() {
+        tokio::spawn(register_with_retry(config.cloud.clone()));
+    } else {
+        tracing::debug!("[cloud] not configured; skipping fleet registration");
+    }
+
     let provider = rustls::crypto::aws_lc_rs::default_provider();
     let ca = RcgenAuthority::new(generated_ca.issuer, 1_000, provider.clone());
     let config = Arc::new(config);
@@ -120,6 +126,41 @@ async fn serve_pac(pac: String, addr: SocketAddr) {
                 });
             }
             Err(err) => tracing::warn!(%err, "PAC server accept error"),
+        }
+    }
+}
+
+/// Registers this agent with the AI-SPM control-plane using the company
+/// install token in `[cloud]`, if it hasn't already (see
+/// `agent_core::registration`). Retries with exponential backoff (5s -> 60s)
+/// forever - a registration failure (backend unreachable at boot, network
+/// hiccup) must never crash `agentd` or block the proxy/DLP path, which
+/// works standalone regardless. No shutdown wiring: like `serve_pac` above,
+/// this runs for the life of the process and is torn down when it exits.
+async fn register_with_retry(cloud: agent_core::config::CloudConfig) {
+    let state_path = cloud.state_dir.join("registration.json");
+    if agent_core::registration::load_registration_state(&state_path).is_some() {
+        tracing::debug!(path = %state_path.display(), "agent already registered; skipping");
+        return;
+    }
+
+    let mut backoff = std::time::Duration::from_secs(5);
+    let max_backoff = std::time::Duration::from_secs(60);
+    loop {
+        match agent_core::registration::register_and_persist(&cloud).await {
+            Ok(response) => {
+                tracing::info!(agent_id = %response.id, org_id = %response.org_id, "registered with AI-SPM control-plane");
+                return;
+            }
+            Err(agent_core::RegistrationError::InvalidToken(err)) => {
+                tracing::error!(%err, "invalid [cloud] install_token/gateway_url; registration disabled");
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(%err, backoff_secs = backoff.as_secs(), "registration attempt failed; retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+            }
         }
     }
 }
