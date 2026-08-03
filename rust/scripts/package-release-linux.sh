@@ -1,14 +1,14 @@
 #!/bin/sh
-# Builds a production release and packages it into dist/ as a versioned
+# Builds a production release and packages it into dist/linux/ as a versioned
 # tar.gz (the .deb + INSTALL-NOTES-LINUX.txt) - the Linux counterpart to
-# scripts/package-release.ps1, so there's one command that always produces
-# the same self-contained deliverable in the same place, reused by both
-# local runs and the release workflow.
+# scripts/package-release.ps1 (which produces dist/windows/), so there's one
+# command that always produces the same self-contained deliverable in the
+# same place, reused by both local runs and the release workflow.
 #
 #   1. cargo build --release --workspace
 #   2. cargo deb -p agent   (produces target/debian/ai-spm-dlp-agent_<version>_amd64.deb)
-#   3. Copies the .deb and packaging/INSTALL-NOTES-LINUX.txt into dist/
-#   4. tar.gz's them into dist/AI-SPM-DLP-Agent-linux-<version>.tar.gz
+#   3. Copies the .deb and packaging/INSTALL-NOTES-LINUX.txt into dist/linux/
+#   4. tar.gz's them into dist/linux/AI-SPM-DLP-Agent-linux-<version>.tar.gz
 #
 # dist/ is gitignored (it's build output); packaging/INSTALL-NOTES-LINUX.txt
 # is the tracked, hand-maintained source of the usage notes bundled with
@@ -34,10 +34,10 @@ if [ -z "$deb" ]; then
     exit 1
 fi
 
-version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$project_root/Cargo.toml" | head -n 1)"
+version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$project_root/Cargo.toml" | head -n 1 | tr -d '\r')"
 
-echo "== Assembling dist/ (version $version) =="
-dist="$project_root/dist"
+echo "== Assembling dist/linux/ (version $version) =="
+dist="$project_root/dist/linux"
 mkdir -p "$dist"
 cp "$deb" "$dist/"
 cp "$project_root/packaging/INSTALL-NOTES-LINUX.txt" "$dist/"

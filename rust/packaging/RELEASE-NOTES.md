@@ -22,3 +22,19 @@ Architecture and internals: see
 [`README.md`](https://github.com/asadsandyapp/ai-spm/blob/rust/README.md).
 
 ### What's changed in this release
+
+**v0.1.0**
+
+- **Linux support (new):** the agent now ships as an installable `.deb`
+  alongside the existing Windows `.msi`. It runs as a systemd service, and
+  installs its CA certificate into the system trust store and Firefox's
+  profile automatically, mirroring the Windows install.
+- Fixed a shutdown bug so the Linux service drains in-flight connections
+  cleanly on `systemctl stop` instead of terminating them immediately.
+- Automated release packaging for both platforms, so every tagged release
+  produces a matching Windows zip and Linux tar.gz from the same build.
+
+**Known limitation (Linux only):** automatic browser proxy configuration
+isn't available yet on Linux (desktop environments vary too much to support
+generically in this release). `agentctl enable-proxy`/`disable-proxy` print
+the manual PAC URL setup steps instead — see `INSTALL-NOTES-LINUX.txt`.
