@@ -7,6 +7,12 @@ in README.md's Testing section actually holds - the same check that's been
 run by hand before every release (see logs/elevated-verify.out), now
 automated so CI catches a regression in the actual proxy path instead of
 only the unit tests.
+
+With --no-launch, doesn't spawn agentd itself - just runs the same checks
+against whatever is already listening on --proxy-port. That's the mode the
+installer smoke test jobs use: after installing the real .msi/.deb, the
+service is already running under its own installed config, so there's
+nothing to launch and no config path to know about.
 """
 import argparse
 import http.client
@@ -64,24 +70,34 @@ def proxy_post(proxy_host, proxy_port, path, body: bytes):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agentd", required=True, help="path to the agentd binary")
-    parser.add_argument("--config", required=True, help="path to config.toml")
+    parser.add_argument("--agentd", help="path to the agentd binary (omit with --no-launch)")
+    parser.add_argument("--config", help="path to config.toml (omit with --no-launch)")
+    parser.add_argument(
+        "--no-launch",
+        action="store_true",
+        help="don't spawn agentd - assume it's already running (e.g. as an installed service)",
+    )
     parser.add_argument("--proxy-host", default="127.0.0.1")
     parser.add_argument("--proxy-port", type=int, default=8443)
     args = parser.parse_args()
 
+    if not args.no_launch and (not args.agentd or not args.config):
+        parser.error("--agentd and --config are required unless --no-launch is set")
+
     server = http.server.HTTPServer((MOCK_HOST, MOCK_PORT), RecordingHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    # Relative paths passed straight to CreateProcess don't reliably resolve
-    # on Windows (observed: os.path.exists() finds it, subprocess.Popen()
-    # doesn't) - absolute paths sidestep that.
-    agentd = subprocess.Popen(
-        [os.path.abspath(args.agentd), "--config", os.path.abspath(args.config)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    agentd = None
+    if not args.no_launch:
+        # Relative paths passed straight to CreateProcess don't reliably
+        # resolve on Windows (observed: os.path.exists() finds it,
+        # subprocess.Popen() doesn't) - absolute paths sidestep that.
+        agentd = subprocess.Popen(
+            [os.path.abspath(args.agentd), "--config", os.path.abspath(args.config)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
     failures = []
     try:
@@ -128,15 +144,16 @@ def main():
             failures.append("clean case: mock server did not receive the unmodified request")
 
     finally:
-        agentd.terminate()
-        try:
-            agentd.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            agentd.kill()
-        output = agentd.stdout.read() if agentd.stdout else ""
-        if failures and output:
-            print("--- agentd output ---")
-            print(output)
+        if agentd is not None:
+            agentd.terminate()
+            try:
+                agentd.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                agentd.kill()
+            output = agentd.stdout.read() if agentd.stdout else ""
+            if failures and output:
+                print("--- agentd output ---")
+                print(output)
 
     if failures:
         print("SMOKE TEST FAILED:")

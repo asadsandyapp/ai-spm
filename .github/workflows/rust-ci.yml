@@ -68,3 +68,148 @@ jobs:
           bin="target/debug/agentd"
           if [ "$RUNNER_OS" = "Windows" ]; then bin="target/debug/agentd.exe"; fi
           python scripts/smoke-test.py --agentd "$bin" --config config.toml
+
+  # Goes further than the `test` job above: builds the actual .msi/.deb the
+  # way scripts/package-release*.ps1/.sh do, installs it for real, and
+  # verifies the same things that were previously checked by hand before a
+  # release (see rust/logs/elevated-verify.out) - service registration, CA
+  # trust-store install, the proxy actually running under the installed
+  # config - then uninstalls and verifies cleanup. Runs as separate jobs
+  # (not part of the `test` matrix) since installing a service/CA system-wide
+  # is heavier and more failure-prone than a plain cargo build; a flake here
+  # shouldn't block the fast unit-test feedback loop. Safe to do on
+  # GitHub-hosted runners specifically because each job gets a fresh,
+  # disposable VM - there's no persistent shared state at risk the way there
+  # would be on a long-lived self-hosted runner or a developer's own machine.
+  installer-test-windows:
+    name: Installer smoke test (Windows MSI)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NASM
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install WiX Toolset v3
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix
+
+      - name: Build and package the MSI
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+
+      - name: Install the MSI
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist\windows\*.msi | Select-Object -First 1
+          $log = "install.log"
+          $proc = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /quiet /norestart /l*v $log" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Get-Content $log -Tail 60
+            throw "msiexec install failed with exit code $($proc.ExitCode)"
+          }
+
+      - name: Verify the service is registered and running
+        shell: pwsh
+        run: |
+          $svc = Get-Service -Name AiSpmDlpAgent -ErrorAction Stop
+          if ($svc.Status -ne 'Running') { throw "service status is $($svc.Status), expected Running" }
+
+      - name: Verify the CA certificate was installed
+        shell: pwsh
+        run: |
+          $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'AI-SPM DLP Agent Local CA' }
+          if (-not $cert) { throw "CA certificate not found in Cert:\LocalMachine\Root" }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run end-to-end smoke test against the installed, running service
+        shell: bash
+        run: python scripts/smoke-test.py --no-launch --proxy-port 8443
+
+      - name: Uninstall the MSI
+        if: always()
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist\windows\*.msi | Select-Object -First 1
+          $proc = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /quiet /norestart" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "msiexec uninstall failed with exit code $($proc.ExitCode)" }
+
+      - name: Verify the service and CA were removed
+        if: always()
+        shell: pwsh
+        run: |
+          $svc = Get-Service -Name AiSpmDlpAgent -ErrorAction SilentlyContinue
+          if ($svc) { throw "service AiSpmDlpAgent is still present after uninstall" }
+          $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'AI-SPM DLP Agent Local CA' }
+          if ($cert) { throw "CA certificate is still present after uninstall" }
+
+  installer-test-linux:
+    name: Installer smoke test (Linux .deb)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build and package the .deb
+        run: ./scripts/package-release-linux.sh
+
+      - name: Install the .deb
+        run: |
+          deb="$(ls dist/linux/*.deb | head -n1)"
+          sudo apt-get install -y "$(pwd)/$deb"
+
+      - name: Verify the systemd service is active
+        run: systemctl is-active ai-spm-dlp-agent
+
+      - name: Verify the CA certificate was installed
+        run: test -f /usr/local/share/ca-certificates/ai-spm-dlp-agent.crt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run end-to-end smoke test against the installed, running service
+        run: python3 scripts/smoke-test.py --no-launch --proxy-port 8443
+
+      - name: Purge the package
+        if: always()
+        run: sudo apt-get remove --purge -y ai-spm-dlp-agent
+
+      - name: Verify the service and CA were removed
+        if: always()
+        run: |
+          if systemctl list-unit-files | grep -q ai-spm-dlp-agent; then
+            echo "systemd unit is still present after purge" >&2
+            exit 1
+          fi
+          if [ -f /usr/local/share/ca-certificates/ai-spm-dlp-agent.crt ]; then
+            echo "CA certificate is still present after purge" >&2
+            exit 1
+          fi

@@ -424,6 +424,17 @@ python scripts/smoke-test.py --agentd target/debug/agentd.exe --config config.to
 
 This runs automatically in CI (`.github/workflows/rust-ci.yml`) on every push.
 
+The same script also checks an already-running agent with `--no-launch`
+(just omit `--agentd`/`--config`) - this is how the `installer-test-windows`
+and `installer-test-linux` CI jobs use it, after installing the real
+`.msi`/`.deb` and confirming the service/CA are actually in place, to verify
+the installed, running service behaves correctly, not just a binary run
+by hand:
+
+```powershell
+python scripts/smoke-test.py --no-launch --proxy-port 8443
+```
+
 For a manual/interactive end-to-end check instead, run `agentd`, then send requests through it — see
 [Run](#run) above. A local mock HTTP server is useful for inspecting exactly
 what bytes a masked/blocked/logged request produces; a minimal example:
