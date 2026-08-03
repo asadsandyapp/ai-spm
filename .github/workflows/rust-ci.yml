@@ -1,14 +1,24 @@
-name: CI
+name: Rust Agent CI
 
 # Windows (Win32 APIs, x86_64-pc-windows-msvc) and Linux (Debian/Ubuntu
 # packaging, x86_64-unknown-linux-gnu) are both supported - see
-# crates/agent-ca and crates/agent-sysnet for the platform-specific bits,
-# and packaging/linux/ for the .deb install path.
+# rust/crates/agent-ca and rust/crates/agent-sysnet for the platform-specific
+# bits, and rust/packaging/linux/ for the .deb install path.
+#
+# Scoped to the rust/ subtree (paths filter) since this lives in the same
+# repo as the rest of the proxy platform and shouldn't run on unrelated
+# changes.
 on:
   push:
-    branches: ["rust"]
+    branches: ["proxy"]
+    paths: ["rust/**"]
   pull_request:
-    branches: ["rust"]
+    branches: ["proxy"]
+    paths: ["rust/**"]
+
+defaults:
+  run:
+    working-directory: rust
 
 jobs:
   test:
@@ -33,6 +43,8 @@ jobs:
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       - name: Build workspace
         run: cargo build --workspace --verbose

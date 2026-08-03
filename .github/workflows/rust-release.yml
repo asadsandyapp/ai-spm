@@ -1,12 +1,12 @@
-name: Release
+name: Rust Agent Release
 
-# Builds the production packages the same way scripts/package-release.ps1
-# (Windows, MSI) and scripts/package-release-linux.sh (Linux, .deb) do
+# Builds the production packages the same way rust/scripts/package-release.ps1
+# (Windows, MSI) and rust/scripts/package-release-linux.sh (Linux, .deb) do
 # locally, then attaches both resulting archives to a GitHub Release
-# whenever a version tag is pushed (e.g. v0.1.0 - match Cargo.toml's
-# [workspace.package] version). Reuses the exact same scripts as the
-# manual/local path, so there's one source of truth for how each release
-# artifact is assembled, not a second copy that can drift.
+# whenever a version tag is pushed (e.g. v0.1.0 - match rust/Cargo.toml's
+# version). Reuses the exact same scripts as the manual/local path, so
+# there's one source of truth for how each release artifact is assembled,
+# not a second copy that can drift.
 on:
   push:
     tags:
@@ -14,6 +14,10 @@ on:
 
 permissions:
   contents: write
+
+defaults:
+  run:
+    working-directory: rust
 
 jobs:
   release-windows:
@@ -42,6 +46,8 @@ jobs:
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       - name: Install cargo-wix
         # The WiX Toolset install above provides candle.exe/light.exe;
@@ -58,12 +64,12 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/AI-SPM-DLP-Agent-*.zip
+          files: rust/dist/windows/AI-SPM-DLP-Agent-*.zip
           # Evergreen "what this is / how to install it" blurb
           # (packaging/RELEASE-NOTES.md, tracked and hand-maintained) forms
           # the top of the release body; GitHub's auto-generated
           # commit/PR list is appended below it via generate_release_notes.
-          body_path: packaging/RELEASE-NOTES.md
+          body_path: rust/packaging/RELEASE-NOTES.md
           generate_release_notes: true
 
   release-linux:
@@ -82,6 +88,8 @@ jobs:
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       - name: Install cargo-deb
         run: cargo install cargo-deb
@@ -92,4 +100,4 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/AI-SPM-DLP-Agent-linux-*.tar.gz
+          files: rust/dist/linux/AI-SPM-DLP-Agent-linux-*.tar.gz
