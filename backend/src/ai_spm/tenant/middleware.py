@@ -280,3 +280,63 @@ class OrgIdBodyValidationMiddleware(BaseHTTPMiddleware):
 
         request._receive = receive  # noqa: SLF001
         return await call_next(request)
+
+
+# PromptRequest.messages has no size constraint, and nothing else in this
+# stack checks body size before buffering it - an unbounded body forwarded
+# straight into the PII/threat scanners (and, for a real provider, the LLM
+# call itself) is a memory/cost DoS. Mirrors the equivalent fix already
+# applied to the Rust MITM agent's request handler
+# (rust/crates/agent-proxy/src/handler.rs).
+MAX_AGENT_BODY_BYTES = 256 * 1024
+
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    """Caps request body size for /agent/v1/* POST endpoints. Must be
+    registered (via app.add_middleware in main.py) so it runs *before*
+    TenantContextMiddleware/OrgIdBodyValidationMiddleware - Starlette runs
+    middleware in the reverse of registration order, so this needs to be
+    added last, closest to the app - so the body is capped before anything
+    downstream ever buffers it."""
+
+    def __init__(self, app, max_bytes: int = MAX_AGENT_BODY_BYTES) -> None:
+        super().__init__(app)
+        self.max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method != "POST" or not request.url.path.startswith("/agent/v1/"):
+            return await call_next(request)
+
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > self.max_bytes:
+            return JSONResponse(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                content={"detail": f"request body exceeds {self.max_bytes} byte limit"},
+            )
+
+        # Cap while streaming regardless of what Content-Length claims (or
+        # if it's absent - chunked transfer-encoding): bounds memory even
+        # for an understated/missing header, not just the honest case above.
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            message = await request.receive()
+            if message["type"] != "http.request":
+                break
+            chunk = message.get("body", b"")
+            total += len(chunk)
+            if total > self.max_bytes:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={"detail": f"request body exceeds {self.max_bytes} byte limit"},
+                )
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+        body = b"".join(chunks)
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive  # noqa: SLF001
+        return await call_next(request)
