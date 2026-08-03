@@ -43,6 +43,7 @@ pub struct ConfigFile {
     pub org_token: Option<String>,
     pub org_id: Option<String>,
     pub agent_id: Option<String>,
+    pub session_token: Option<String>,
     pub proxy_listen: Option<String>,
     pub mtls_cert_path: Option<String>,
     pub mtls_key_path: Option<String>,
@@ -67,6 +68,12 @@ pub struct Config {
     pub org_token: String,
     pub org_id: Uuid,
     pub agent_id: Option<Uuid>,
+    /// Bearer token for every /agent/v1/* call other than /register (see
+    /// GatewayClient::auth_headers). Only meaningful paired with agent_id -
+    /// set together when a deployment pre-configures both to skip calling
+    /// register() again; register() itself populates both at runtime
+    /// regardless of what's configured here.
+    pub session_token: Option<String>,
     pub proxy_listen: SocketAddr,
     pub mtls_cert_path: Option<String>,
     pub mtls_key_path: Option<String>,
@@ -142,6 +149,10 @@ impl Config {
             Some(value) => Some(Self::parse_uuid(&value, "agent_id")?),
             None => None,
         };
+
+        let session_token = env::var("AISPM_SESSION_TOKEN")
+            .ok()
+            .or_else(|| file_cfg.as_ref().and_then(|f| f.session_token.clone()));
 
         let proxy_listen = env::var("AISPM_PROXY_LISTEN")
             .ok()
@@ -258,6 +269,7 @@ impl Config {
             org_token,
             org_id,
             agent_id,
+            session_token,
             proxy_listen,
             mtls_cert_path,
             mtls_key_path,
