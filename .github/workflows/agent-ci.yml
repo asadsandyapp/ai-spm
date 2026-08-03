@@ -20,6 +20,10 @@ on:
   pull_request:
     branches: ["proxy"]
     paths: ["agent/**"]
+  # Lets this be run on demand from the Actions tab - useful right after
+  # adding/changing the workflow itself, since a path-filtered push/PR won't
+  # fire it unless the push actually touches agent/**.
+  workflow_dispatch:
 
 defaults:
   run:
