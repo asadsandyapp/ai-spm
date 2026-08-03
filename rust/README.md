@@ -604,8 +604,21 @@ certificate-acquisition step, not something fixable in the build.
 
 - The CA private key is currently stored as a plaintext PEM file
   (`data/ca/key_path`, `Program Files\agent\bin\data\ca\root.key` in a
-  production install). DPAPI encryption at rest is a follow-up item (see
-  below).
+  production install), restricted to owner-only access at creation time
+  (`chmod 0600` on Linux; `icacls` limited to SYSTEM + the account that
+  generated it on Windows — not "Administrators", since group membership
+  alone doesn't grant an elevated token's access) rather than left at
+  whatever the default umask/inherited ACL would otherwise allow. DPAPI
+  encryption at rest is still a follow-up item (see below) — this only
+  closes the "any other local account can just read the file" gap.
+- On Linux, `agentd` runs as a dedicated unprivileged system user
+  (`ai-spm-dlp-agent`), not root, under a sandboxed systemd unit
+  (`NoNewPrivileges`, `ProtectSystem=strict`, empty `CapabilityBoundingSet`,
+  etc. — see `packaging/linux/ai-spm-dlp-agent.service`). Only
+  `agentctl install --full` itself (run once, by `postinst`, as root) needs
+  elevated privileges — for installing the CA into the system trust store
+  and enabling the service — not the long-running daemon that parses
+  attacker-controlled traffic.
 - `agentctl install --full` installs the CA into the **Local Machine**
   Trusted Root store — every account on the box (and the ChatGPT desktop app,
   and Firefox via its enterprise policy) trusts it, not just the user who ran

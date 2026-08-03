@@ -4,10 +4,32 @@ After=network.target
 
 [Service]
 Type=simple
+User=ai-spm-dlp-agent
+Group=ai-spm-dlp-agent
 ExecStart=/usr/bin/agentd --config /etc/ai-spm-dlp-agent/config.toml
 WorkingDirectory=/var/lib/ai-spm-dlp-agent
 Restart=on-failure
 RestartSec=30
+
+# Runs as an unprivileged dedicated user (postinst creates it; agentctl
+# install --full chowns /var/lib/ai-spm-dlp-agent and /var/log/ai-spm-dlp-agent
+# to it before the first start - see chown_state_dirs in src/bin/agentctl.rs).
+# Nothing at steady state needs root: both listeners bind loopback ports
+# above 1024, and the CA is generated once and just read from then on.
+# Sandboxed accordingly, since this process parses fully attacker-controlled
+# TLS-terminated traffic - a bug here should be contained, not a path to root.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ai-spm-dlp-agent /var/log/ai-spm-dlp-agent
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

@@ -309,6 +309,13 @@ fn install_full(config: &AgentConfig, config_path: &Path, full: bool) -> anyhow:
 
         install_firefox_trust();
 
+        // The service runs as the unprivileged `agent::SERVICE_USER`, not
+        // root (see the `.service` file's User=/hardening directives) - but
+        // everything generated above (the local MITM CA, its state dir) was
+        // just written by *this* root process. Without this chown, the
+        // service's very first start would fail to read its own CA key.
+        chown_state_dirs(config).context("handing state/log directories to the service user")?;
+
         agent::systemd::install().context("enabling the ai-spm-dlp-agent systemd service")?;
         println!("Enabled and started the 'ai-spm-dlp-agent' systemd service (auto-start, restart on failure).");
         println!(
@@ -340,6 +347,43 @@ fn install_full(config: &AgentConfig, config_path: &Path, full: bool) -> anyhow:
         }
     }
 
+    Ok(())
+}
+
+/// Hands the CA/PAC state dir and the log dir to [`agent::SERVICE_USER`],
+/// recursively, so the sandboxed systemd service (which runs as that user,
+/// not root - see the `.service` file) can read the CA key this same
+/// (root) process just generated, and write its own logs/PAC file. Derived
+/// from `config` rather than hardcoding `/var/lib/ai-spm-dlp-agent` and
+/// `/var/log/ai-spm-dlp-agent` directly, so a customized packaging config
+/// doesn't silently leave the wrong directory root-owned.
+#[cfg(target_os = "linux")]
+fn chown_state_dirs(config: &AgentConfig) -> anyhow::Result<()> {
+    let mut dirs = vec![config.logging.file_dir.clone()];
+    if let Some(parent) = config.ca.cert_path.parent() {
+        dirs.push(parent.to_path_buf());
+    }
+    if let Some(parent) = config.sysnet.pac_path.parent() {
+        dirs.push(parent.to_path_buf());
+    }
+
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let owner = format!("{0}:{0}", agent::SERVICE_USER);
+        let output = std::process::Command::new("chown")
+            .args(["-R", &owner])
+            .arg(&dir)
+            .output()
+            .with_context(|| format!("spawning chown for {}", dir.display()))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "chown -R {owner} {} failed: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     Ok(())
 }
 
