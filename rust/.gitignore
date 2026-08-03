@@ -1,0 +1,16 @@
+# Rust build output
+/target
+
+# Local CA — contains the private key (root.key); never commit.
+data/ca/
+
+# Generated, machine-specific proxy auto-config file.
+data/proxy.pac
+
+# Runtime logs (may contain host names of intercepted traffic).
+/logs
+
+# Packaged distributables (MSI + install notes, and the zipped bundle) —
+# build artifacts, not source.
+/dist
+*.zip

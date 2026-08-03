@@ -1,0 +1,8 @@
+# Debian maintainer scripts and shell scripts must keep LF line endings even
+# when checked out on Windows (autocrlf) - a CRLF shebang/script body fails
+# to run on Linux (e.g. `#!/bin/sh\r`, or `\r` corrupting case-statement
+# argument matching).
+packaging/linux/postinst text eol=lf
+packaging/linux/postrm text eol=lf
+packaging/linux/prerm text eol=lf
+*.sh text eol=lf

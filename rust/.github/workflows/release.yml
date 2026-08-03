@@ -1,0 +1,95 @@
+name: Release
+
+# Builds the production packages the same way scripts/package-release.ps1
+# (Windows, MSI) and scripts/package-release-linux.sh (Linux, .deb) do
+# locally, then attaches both resulting archives to a GitHub Release
+# whenever a version tag is pushed (e.g. v0.1.0 - match Cargo.toml's
+# [workspace.package] version). Reuses the exact same scripts as the
+# manual/local path, so there's one source of truth for how each release
+# artifact is assembled, not a second copy that can drift.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install NASM
+        # Build-time dependency of the TLS/crypto stack (aws-lc-rs).
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install WiX Toolset v3
+        # scripts/package-release.ps1 resolves candle.exe/light.exe via the
+        # machine-level WIX environment variable read directly through
+        # [System.Environment]::GetEnvironmentVariable(...,"Machine") rather
+        # than $env:WIX, specifically so it picks up whatever this install
+        # step just wrote to the registry even though it happens mid-job.
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-wix
+        # The WiX Toolset install above provides candle.exe/light.exe;
+        # this is the separate `cargo wix` subcommand itself, which
+        # package-release.ps1 shells out to - a first release run failed
+        # with "no such command: wix" because only the toolset, not this
+        # subcommand, was ever installed on the runner.
+        run: cargo install cargo-wix
+
+      - name: Build and package release
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AI-SPM-DLP-Agent-*.zip
+          # Evergreen "what this is / how to install it" blurb
+          # (packaging/RELEASE-NOTES.md, tracked and hand-maintained) forms
+          # the top of the release body; GitHub's auto-generated
+          # commit/PR list is appended below it via generate_release_notes.
+          body_path: packaging/RELEASE-NOTES.md
+          generate_release_notes: true
+
+  release-linux:
+    name: Build and publish Linux release
+    # Runs after release-windows so both jobs upload to the same release
+    # (created by release-windows) instead of racing to create it twice;
+    # only release-windows sets body/generate_release_notes.
+    needs: release-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build and package release
+        run: ./scripts/package-release-linux.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AI-SPM-DLP-Agent-linux-*.tar.gz

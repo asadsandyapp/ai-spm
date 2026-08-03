@@ -1,0 +1,97 @@
+# AI-SPM DLP Agent - default detection policy.
+# kind: "regex" (pattern is a regular expression) or "literal" (plain substring, case-insensitive)
+# severity: low | medium | high | critical
+# action: log | mask | block
+# label: short type code used in the mask token [MASKED-<label>-NNN] (defaults
+#        to the upper-cased id if omitted)
+
+[[rule]]
+id = "aws_access_key"
+kind = "regex"
+label = "AWS_KEY"
+pattern = '(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'
+severity = "critical"
+action = "block"
+
+[[rule]]
+id = "credit_card"
+kind = "regex"
+label = "CC"
+# Requires the grouped 4-4-4-(1-4) shape a human-entered/pasted card number
+# actually has, with a consistent separator between groups. The previous
+# pattern (`\b(?:\d[ -]?){13,16}\b`) matched any bare run of 13-16 digits,
+# which also matches epoch-millisecond timestamps, trace/session IDs, and
+# other numeric telemetry fields - it was flooding real traffic with false
+# positives (see: chatgpt.com's own Datadog RUM beacons at /ces/v1/*).
+pattern = '\b\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,4}\b'
+severity = "high"
+action = "mask"
+
+[[rule]]
+id = "pk_cnic"
+kind = "regex"
+label = "CNIC"
+# Pakistani CNIC in its written form: 5-7-1 digit groups with dashes
+# (e.g. 42101-1234567-1). Deliberately does NOT match 13 bare digits —
+# undelimited digit runs match timestamps/IDs in web telemetry (same
+# false-positive class the credit_card rule was tightened for).
+pattern = '\b\d{5}-\d{7}-\d\b'
+severity = "high"
+action = "mask"
+
+[[rule]]
+id = "email_address"
+kind = "regex"
+label = "EMAIL"
+# Standard email shape: local-part @ domain with a TLD. Kept deliberately
+# conservative (requires a dot-TLD of 2+ letters) so it doesn't fire on
+# things like "user@localhost" or stray "@handle" mentions.
+pattern = '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+severity = "medium"
+action = "mask"
+
+[[rule]]
+id = "phone_intl"
+kind = "regex"
+label = "PHONE"
+# International-format phone numbers: leading + country code, then 2-4 and
+# 6-8 digit groups separated by dashes or spaces (e.g. +92-300-1234567).
+# Requires the leading + so it doesn't fire on arbitrary digit runs.
+pattern = '\+\d{1,3}[- ]?\d{2,4}[- ]?\d{6,8}\b'
+severity = "medium"
+action = "mask"
+
+[[rule]]
+id = "iban"
+kind = "regex"
+label = "IBAN"
+# IBAN / international bank account: 2-letter country code, 2 check digits,
+# then 11-30 alphanumerics (e.g. PK36SCBL0000001123456702). NOTE: this is a
+# structural match only, no mod-97 checksum validation, so it can over-match
+# on other uppercase alnum tokens of the same shape - flagged for real-traffic
+# tuning like credit_card was.
+pattern = '\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b'
+severity = "high"
+action = "mask"
+
+[[rule]]
+id = "us_ssn"
+kind = "regex"
+label = "SSN"
+pattern = '\b\d{3}-\d{2}-\d{4}\b'
+severity = "high"
+action = "mask"
+
+[[rule]]
+id = "private_key_block"
+kind = "literal"
+pattern = "-----BEGIN PRIVATE KEY-----"
+severity = "critical"
+action = "block"
+
+[[rule]]
+id = "internal_codename_falcon"
+kind = "literal"
+pattern = "Project Falcon"
+severity = "medium"
+action = "log"
