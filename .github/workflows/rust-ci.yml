@@ -51,3 +51,20 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --verbose
+
+      - name: Set up Python (for the end-to-end smoke test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run end-to-end smoke test
+        # Starts the actual built agentd and sends real HTTP traffic through
+        # its proxy port - verifies block/mask/pass-through end-to-end (see
+        # scripts/smoke-test.py), the same check documented in README.md's
+        # Testing section, now run automatically on every build instead of
+        # only when someone remembers to do it by hand.
+        shell: bash
+        run: |
+          bin="target/debug/agentd"
+          if [ "$RUNNER_OS" = "Windows" ]; then bin="target/debug/agentd.exe"; fi
+          python scripts/smoke-test.py --agentd "$bin" --config config.toml

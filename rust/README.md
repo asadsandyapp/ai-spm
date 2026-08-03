@@ -412,7 +412,19 @@ Runs the DLP engine's unit tests (rule detection, masking, action precedence)
 plus config/policy parsing tests. These don't require the proxy to be
 running.
 
-For an end-to-end check, run `agentd`, then send requests through it — see
+For an automated end-to-end check, run `scripts/smoke-test.py` against a
+built `agentd` - it starts the real binary, sends the same block/mask/
+pass-through requests documented below through the actual proxy port, and
+checks the responses and what the mock upstream received:
+
+```powershell
+cargo build --workspace
+python scripts/smoke-test.py --agentd target/debug/agentd.exe --config config.toml
+```
+
+This runs automatically in CI (`.github/workflows/rust-ci.yml`) on every push.
+
+For a manual/interactive end-to-end check instead, run `agentd`, then send requests through it — see
 [Run](#run) above. A local mock HTTP server is useful for inspecting exactly
 what bytes a masked/blocked/logged request produces; a minimal example:
 
