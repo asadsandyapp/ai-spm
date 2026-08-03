@@ -67,8 +67,13 @@ class PromptPipelineService:
         combined_text = " ".join(m.get("content", "") for m in messages)
 
         # Step 1-3: Policy evaluation (deny by default for blocked models/topics)
+        # Previously truncated to combined_text[:200] before the blocklist
+        # check, so padding a prompt past 200 chars silently defeated topic
+        # blocking. Safe to evaluate the full text now that
+        # MaxBodySizeMiddleware (tenant/middleware.py) bounds the overall
+        # request size - this substring check stays cheap regardless.
         allowed, policy_reason = await self.policy_engine.evaluate(
-            session, org_id, provider, model, topic=combined_text[:200]
+            session, org_id, provider, model, topic=combined_text
         )
         if not allowed:
             event = await self._create_audit(

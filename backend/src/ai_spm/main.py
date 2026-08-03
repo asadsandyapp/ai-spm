@@ -16,7 +16,11 @@ from ai_spm.platform.api.v1.tenants import router as platform_router
 from ai_spm.presentation.middleware.correlation_id import CorrelationIdMiddleware
 from ai_spm.presentation.websocket.dashboard_ws import router as ws_router
 from ai_spm.public.api.v1.signup import router as public_router
-from ai_spm.tenant.middleware import OrgIdBodyValidationMiddleware, TenantContextMiddleware
+from ai_spm.tenant.middleware import (
+    MaxBodySizeMiddleware,
+    OrgIdBodyValidationMiddleware,
+    TenantContextMiddleware,
+)
 from ai_spm.tenant.quota import QuotaMiddleware
 
 structlog.configure(
@@ -58,6 +62,10 @@ def create_app() -> FastAPI:
     app.add_middleware(QuotaMiddleware)
     app.add_middleware(OrgIdBodyValidationMiddleware)
     app.add_middleware(TenantContextMiddleware)
+    # Added last so it's outermost (Starlette runs middleware in the
+    # reverse of registration order) - the body must be capped before
+    # TenantContextMiddleware/OrgIdBodyValidationMiddleware ever buffer it.
+    app.add_middleware(MaxBodySizeMiddleware)
 
     app.include_router(public_router)
     app.include_router(admin_router)
