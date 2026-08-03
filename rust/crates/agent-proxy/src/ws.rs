@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_core::config::AgentConfig;
+use agent_core::config::{AgentConfig, OversizedAction};
 use agent_core::policy::Action;
 use agent_dlp::{highest_priority_action, mask_body, scan_body, RuleSet};
 use hudsucker::tokio_tungstenite::tungstenite::Message;
@@ -49,13 +49,26 @@ impl WebSocketHandler for WsDlpHandler {
         match message {
             Message::Text(text) => {
                 if text.len() > max {
-                    tracing::warn!(
-                        host,
-                        len = text.len(),
-                        max,
-                        "ws text frame exceeds max_body_bytes, passing through unscanned"
-                    );
-                    return Some(Message::Text(text));
+                    return match self.config.proxy.on_oversized {
+                        OversizedAction::Block => {
+                            tracing::warn!(
+                                host,
+                                len = text.len(),
+                                max,
+                                "ws text frame exceeds max_body_bytes, dropping (on_oversized=block)"
+                            );
+                            None
+                        }
+                        OversizedAction::Log => {
+                            tracing::warn!(
+                                host,
+                                len = text.len(),
+                                max,
+                                "ws text frame exceeds max_body_bytes, passing through unscanned"
+                            );
+                            Some(Message::Text(text))
+                        }
+                    };
                 }
 
                 // Raw-traffic trace: opt-in only, same rules as the HTTP
@@ -73,13 +86,26 @@ impl WebSocketHandler for WsDlpHandler {
             }
             Message::Binary(data) => {
                 if data.len() > max {
-                    tracing::warn!(
-                        host,
-                        len = data.len(),
-                        max,
-                        "ws binary frame exceeds max_body_bytes, passing through unscanned"
-                    );
-                    return Some(Message::Binary(data));
+                    return match self.config.proxy.on_oversized {
+                        OversizedAction::Block => {
+                            tracing::warn!(
+                                host,
+                                len = data.len(),
+                                max,
+                                "ws binary frame exceeds max_body_bytes, dropping (on_oversized=block)"
+                            );
+                            None
+                        }
+                        OversizedAction::Log => {
+                            tracing::warn!(
+                                host,
+                                len = data.len(),
+                                max,
+                                "ws binary frame exceeds max_body_bytes, passing through unscanned"
+                            );
+                            Some(Message::Binary(data))
+                        }
+                    };
                 }
 
                 match binary_frame_verdict(&self.ruleset, &host, &data) {

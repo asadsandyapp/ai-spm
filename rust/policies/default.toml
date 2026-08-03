@@ -84,8 +84,12 @@ action = "mask"
 
 [[rule]]
 id = "private_key_block"
-kind = "literal"
-pattern = "-----BEGIN PRIVATE KEY-----"
+kind = "regex"
+# Was a literal match on just "-----BEGIN PRIVATE KEY-----" (PKCS#8 only) -
+# missed the equally common RSA/EC/OpenSSH/DSA PEM headers entirely, letting
+# those private key formats through unblocked. Matches the empty-prefix case
+# too so plain "-----BEGIN PRIVATE KEY-----" still blocks.
+pattern = '-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED |)PRIVATE KEY-----'
 severity = "critical"
 action = "block"
 

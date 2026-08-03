@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_core::config::AgentConfig;
+use agent_core::config::{AgentConfig, OversizedAction};
 use agent_core::policy::Action;
 use agent_dlp::{highest_priority_action, mask_body, scan_body, Match, RuleSet};
 use http::{header, Request, Response, StatusCode};
@@ -75,13 +75,26 @@ impl HttpHandler for DlpHandler {
 
         let max_body_bytes = self.config.proxy.max_body_bytes;
         if collected.len() > max_body_bytes {
-            tracing::warn!(
-                host,
-                len = collected.len(),
-                max = max_body_bytes,
-                "request body exceeds max_body_bytes, passing through unscanned"
-            );
-            return RequestOrResponse::Request(Request::from_parts(parts, Body::from(collected)));
+            match self.config.proxy.on_oversized {
+                OversizedAction::Block => {
+                    tracing::warn!(
+                        host,
+                        len = collected.len(),
+                        max = max_body_bytes,
+                        "request body exceeds max_body_bytes, blocking (on_oversized=block)"
+                    );
+                    return RequestOrResponse::Response(oversized_block_response());
+                }
+                OversizedAction::Log => {
+                    tracing::warn!(
+                        host,
+                        len = collected.len(),
+                        max = max_body_bytes,
+                        "request body exceeds max_body_bytes, passing through unscanned"
+                    );
+                    return RequestOrResponse::Request(Request::from_parts(parts, Body::from(collected)));
+                }
+            }
         }
 
         // Raw-traffic trace: opt-in only (RUST_LOG must enable `trace` for
@@ -169,6 +182,21 @@ fn body_read_failed_response() -> Response<Body> {
 
     Response::builder()
         .status(StatusCode::BAD_GATEWAY)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(bytes))
+        .expect("building a static response cannot fail")
+}
+
+fn oversized_block_response() -> Response<Body> {
+    let body = serde_json::json!({
+        "blocked_by": "AI-SPM DLP Agent",
+        "message": "This request's body exceeds the configured size limit and was blocked \
+                    (on_oversized = \"block\") rather than forwarded unscanned.",
+    });
+    let bytes = serde_json::to_vec(&body).unwrap_or_default();
+
+    Response::builder()
+        .status(StatusCode::FORBIDDEN)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(bytes))
         .expect("building a static response cannot fail")

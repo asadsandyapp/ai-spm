@@ -26,6 +26,9 @@ pub enum CaError {
     #[error("rcgen error: {0}")]
     Rcgen(#[from] rcgen::Error),
 
+    #[error("failed to restrict permissions on {path}: {reason}")]
+    Permissions { path: PathBuf, reason: String },
+
     #[error("failed to parse existing policies.json: {0}")]
     Json(#[from] serde_json::Error),
 

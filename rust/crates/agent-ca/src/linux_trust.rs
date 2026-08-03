@@ -105,18 +105,75 @@ fn user_nssdb_arg() -> Result<String, CaError> {
     Ok(format!("sql:{home}/.pki/nssdb"))
 }
 
+/// Writes `cert_pem` to a fresh file under the temp dir and returns its path.
+/// Uses `create_new` (fails if the path already exists, symlink or not)
+/// rather than `File::create` (which happily follows an existing symlink) -
+/// a local attacker who pre-creates a symlink at this predictable,
+/// PID-based path can no longer redirect the write to a file they control.
+/// Permissions are set to owner-only at creation (`mode`), not via a
+/// separate `chmod` afterward, so there's no window where the file exists
+/// world-readable.
 fn write_temp_pem(cert_pem: &str) -> Result<PathBuf, CaError> {
+    use std::os::unix::fs::OpenOptionsExt;
+
     let path = std::env::temp_dir().join(format!("ai-spm-dlp-agent-ca-{}.pem", std::process::id()));
-    let mut file = std::fs::File::create(&path).map_err(|source| CaError::Write {
-        path: path.clone(),
-        source,
-    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|source| CaError::Write {
+            path: path.clone(),
+            source,
+        })?;
     file.write_all(cert_pem.as_bytes())
         .map_err(|source| CaError::Write {
             path: path.clone(),
             source,
         })?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn expected_temp_path() -> PathBuf {
+        std::env::temp_dir().join(format!("ai-spm-dlp-agent-ca-{}.pem", std::process::id()))
+    }
+
+    // A single test, not two: both scenarios target the same PID-derived
+    // path `write_temp_pem` always uses, and cargo runs tests in parallel
+    // threads of one process (same PID) - two separate tests racing on that
+    // path would be flaky. Sequential steps in one test avoids that.
+    #[test]
+    fn write_temp_pem_writes_owner_only_and_refuses_to_follow_a_symlink() {
+        let path = expected_temp_path();
+        let _ = std::fs::remove_file(&path);
+
+        // Happy path: no pre-existing file, and the result is owner-only.
+        let written = write_temp_pem("hello").unwrap();
+        assert_eq!(written, path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        std::fs::remove_file(&path).unwrap();
+
+        // A local attacker pre-creating a symlink at this predictable path
+        // must not get their target written to - create_new fails on any
+        // existing directory entry, symlink included, rather than following it.
+        let decoy = std::env::temp_dir().join(format!("ai-spm-dlp-agent-ca-decoy-{}", std::process::id()));
+        std::fs::write(&decoy, "attacker-controlled").unwrap();
+        std::os::unix::fs::symlink(&decoy, &path).unwrap();
+
+        let result = write_temp_pem("should not be written");
+        assert!(result.is_err(), "expected write_temp_pem to refuse an existing symlink");
+        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), "attacker-controlled");
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(&decoy).unwrap();
+    }
 }
 
 fn run_command(program: &str, args: &[&str]) -> Result<(), CaError> {
