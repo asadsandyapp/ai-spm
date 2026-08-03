@@ -1,0 +1,69 @@
+name: Agent CI
+
+# Windows (Win32 APIs via the optional windows-service feature on
+# agent-service) and Linux (systemd) are both supported - see
+# agent/crates/agent-service and agent/crates/agent-core/src/network_setup.rs
+# for the platform-specific transparent-interception bits.
+#
+# This workspace's TLS stack (boring/tokio-boring/hyper-boring, i.e.
+# BoringSSL via boring-sys) needs libclang (bindgen) plus Go/CMake/NASM to
+# build from source - not all preinstalled on every runner image, so this
+# installs them explicitly rather than assuming they're there.
+#
+# Scoped to the agent/ subtree (paths filter) since this lives in the same
+# repo as the rest of the proxy platform and shouldn't run on unrelated
+# changes.
+on:
+  push:
+    branches: ["proxy"]
+    paths: ["agent/**"]
+  pull_request:
+    branches: ["proxy"]
+    paths: ["agent/**"]
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  test:
+    name: Build & test
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NASM
+        # boring-sys (BoringSSL) uses NASM-based assembly on x86_64, same
+        # reason rust-ci.yml needs it for aws-lc-rs - not preinstalled on
+        # the windows-latest runner image.
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install LLVM/libclang
+        # bindgen (via boring-sys) needs libclang to generate BoringSSL's
+        # FFI bindings. Not guaranteed present on windows-latest; installed
+        # explicitly rather than hoping it's already on PATH.
+        if: runner.os == 'Windows'
+        run: choco install llvm -y --no-progress
+
+      - name: Install build tools for BoringSSL (clang, cmake, go)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang libclang-dev cmake golang-go
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+
+      - name: Build workspace
+        run: cargo build --workspace --verbose
+
+      - name: Run tests
+        run: cargo test --workspace --verbose
