@@ -345,6 +345,11 @@ file_dir = "logs"     # daily-rotating log file location
 [sysnet]
 pac_path = "data/proxy.pac"   # disk copy of the PAC (for inspection); agentd serves it over HTTP
 pac_port = 8444               # loopback port agentd serves the PAC on (auto-config URL points here)
+
+# Optional - omit entirely for a fully standalone agent (the default).
+# [cloud]
+# gateway_url = "https://gateway.example.com"
+# install_token = "<org_id>.<secret>"   # see "Cloud registration" below
 ```
 
 `policies/default.toml` — one `[[rule]]` per detection:
@@ -367,6 +372,36 @@ When multiple rules match a request, `block` wins over `mask` wins over `log`
 (ties broken by severity). **Restart `agentd` after editing the policy file**
 — it's loaded once at startup; hot-reload is not implemented yet (see
 [Not yet implemented](#not-yet-implemented)).
+
+## Cloud registration
+
+Optional, and off by default — an agent with no `[cloud]` section (or with
+either field blank) stays exactly as standalone as it is today; nothing here
+is read unless both `gateway_url` and `install_token` are set.
+
+An admin distributes one opaque **install token**, shaped
+`<org_id-uuid>.<secret>` — paste it into `config.toml`'s `[cloud]` section
+(see [Configuration](#configuration) above) before installing. On next
+startup (or immediately, via `agentctl install --full`), `agentd` splits the
+token locally into the `org_id` and secret the backend's
+`POST /agent/v1/register` endpoint needs, registers once, and persists the
+result under `[cloud].state_dir` (default `data/cloud/`):
+
+- `registration.json` — the assigned `agent_id`. Its presence is what makes
+  registration idempotent across restarts; delete it to force re-registration.
+- `agent.crt` / `agent.key` / `ca.crt` — the mTLS material the backend issues
+  on registration (not consumed by anything in this build yet — reserved for
+  future policy-pull/event-reporting work).
+
+If the backend is unreachable, `agentd` retries in the background with
+exponential backoff (5s → 60s) rather than failing to start — the proxy/DLP
+path works standalone regardless of cloud registration status. Useful
+commands:
+
+```powershell
+agentctl register        # explicit one-shot attempt (also what install --full runs once)
+agentctl status           # shows: not configured / configured but not yet registered / registered (agent_id: ...)
+```
 
 ## Tuning detection rules
 
@@ -569,8 +604,21 @@ certificate-acquisition step, not something fixable in the build.
 
 - The CA private key is currently stored as a plaintext PEM file
   (`data/ca/key_path`, `Program Files\agent\bin\data\ca\root.key` in a
-  production install). DPAPI encryption at rest is a follow-up item (see
-  below).
+  production install), restricted to owner-only access at creation time
+  (`chmod 0600` on Linux; `icacls` limited to SYSTEM + the account that
+  generated it on Windows — not "Administrators", since group membership
+  alone doesn't grant an elevated token's access) rather than left at
+  whatever the default umask/inherited ACL would otherwise allow. DPAPI
+  encryption at rest is still a follow-up item (see below) — this only
+  closes the "any other local account can just read the file" gap.
+- On Linux, `agentd` runs as a dedicated unprivileged system user
+  (`ai-spm-dlp-agent`), not root, under a sandboxed systemd unit
+  (`NoNewPrivileges`, `ProtectSystem=strict`, empty `CapabilityBoundingSet`,
+  etc. — see `packaging/linux/ai-spm-dlp-agent.service`). Only
+  `agentctl install --full` itself (run once, by `postinst`, as root) needs
+  elevated privileges — for installing the CA into the system trust store
+  and enabling the service — not the long-running daemon that parses
+  attacker-controlled traffic.
 - `agentctl install --full` installs the CA into the **Local Machine**
   Trusted Root store — every account on the box (and the ChatGPT desktop app,
   and Firefox via its enterprise policy) trusts it, not just the user who ran

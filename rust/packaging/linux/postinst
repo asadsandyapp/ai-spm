@@ -8,6 +8,13 @@ set -e
 
 case "$1" in
     configure)
+        # Dedicated unprivileged user the systemd unit runs `agentd` as (see
+        # User=/Group= + hardening directives in the .service file) - created
+        # here, before `install --full`, so it exists by the time that command
+        # chowns the state/log dirs to it and starts the service. --system
+        # gives it a low, non-login uid; idempotent across package upgrades.
+        id -u ai-spm-dlp-agent >/dev/null 2>&1 || useradd --system --no-create-home \
+            --shell /usr/sbin/nologin ai-spm-dlp-agent
         mkdir -p /var/lib/ai-spm-dlp-agent /var/log/ai-spm-dlp-agent
         /usr/bin/agentctl install --full --config /etc/ai-spm-dlp-agent/config.toml
         ;;

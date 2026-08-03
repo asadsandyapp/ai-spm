@@ -67,6 +67,7 @@ pub fn load_or_generate(cert_path: &Path, key_path: &Path) -> Result<GeneratedCa
             path: key_path.to_path_buf(),
             source,
         })?;
+        restrict_key_permissions(key_path)?;
         key_pair
     };
 
@@ -111,6 +112,77 @@ pub fn load_or_generate(cert_path: &Path, key_path: &Path) -> Result<GeneratedCa
     })
 }
 
+/// Lock the CA private key down to owner-only access right after writing it.
+/// `std::fs::write` applies no permission restriction of its own (subject to
+/// umask on Unix - typically 0644 - and inherited ACLs on Windows), and this
+/// key is installed into the **system-wide** trust store (see
+/// `agentctl install --full` -> `StoreScope::LocalMachine`): a world-readable
+/// key on a machine with any other local account lets that account mint
+/// certificates trusted machine-wide, fully defeating the interception
+/// trust model.
+#[cfg(unix)]
+fn restrict_key_permissions(path: &Path) -> Result<(), CaError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|source| {
+        CaError::Permissions {
+            path: path.to_path_buf(),
+            reason: source.to_string(),
+        }
+    })
+}
+
+/// Windows equivalent: strip inherited ACEs and grant access only to SYSTEM
+/// (by well-known SID `*S-1-5-18`, not a localized name) and whichever
+/// account is actually running this process. That second grant matters as
+/// much as the first: this code runs both as LocalSystem (the Windows
+/// Service, via `agentctl install --full`) and as the interactive user
+/// (`agentctl install-ca`, or any dev/manual run) - locking the file to
+/// "SYSTEM + Administrators" instead would deny the very account that just
+/// created it, since group membership alone doesn't grant an elevated
+/// token's access (this was caught by `reuses_key_and_leaves_cert_alone_*`
+/// failing with Access Denied on the very next read).
+#[cfg(windows)]
+fn restrict_key_permissions(path: &Path) -> Result<(), CaError> {
+    let whoami_output = std::process::Command::new("whoami").output().map_err(|source| {
+        CaError::Permissions {
+            path: path.to_path_buf(),
+            reason: format!("failed to run whoami: {source}"),
+        }
+    })?;
+    let current_user = String::from_utf8_lossy(&whoami_output.stdout).trim().to_string();
+
+    let mut args = vec!["/inheritance:r".to_string(), "/grant:r".to_string(), "*S-1-5-18:F".to_string()];
+    if !current_user.is_empty() {
+        args.push(format!("{current_user}:F"));
+    }
+
+    let output = std::process::Command::new("icacls")
+        .arg(path)
+        .args(&args)
+        .output()
+        .map_err(|source| CaError::Permissions {
+            path: path.to_path_buf(),
+            reason: format!("failed to spawn icacls: {source}"),
+        })?;
+
+    if !output.status.success() {
+        return Err(CaError::Permissions {
+            path: path.to_path_buf(),
+            reason: format!(
+                "icacls exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restrict_key_permissions(_path: &Path) -> Result<(), CaError> {
+    Ok(())
+}
+
 fn ca_params() -> Result<CertificateParams, CaError> {
     let mut params = CertificateParams::new(Vec::<String>::new())?;
     params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
@@ -137,6 +209,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_key_is_owner_only_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir("perms");
+        let cert_path = dir.join("root.crt");
+        let key_path = dir.join("root.key");
+
+        load_or_generate(&cert_path, &key_path).unwrap();
+
+        let mode = std::fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

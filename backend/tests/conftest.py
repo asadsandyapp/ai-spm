@@ -36,6 +36,7 @@ from ai_spm.domain.models import (
 from ai_spm.infrastructure.auth.password import (
     create_admin_access_token,
     create_platform_access_token,
+    generate_token,
     hash_password,
     hash_token,
 )
@@ -171,11 +172,13 @@ async def tenant_a(db_session: AsyncSession) -> dict:
             max_prompts_per_day=1000,
             audit_retention_days=90,
         )
+        agent_session_token = generate_token(48)
         agent = Agent(
             id=uuid.uuid4(),
             org_id=org.id,
             hostname="acme-ws-01",
             status=AgentStatus.ONLINE,
+            session_token_hash=hash_token(agent_session_token),
         )
         audit = AuditEvent(
             id=uuid.uuid4(),
@@ -193,6 +196,7 @@ async def tenant_a(db_session: AsyncSession) -> dict:
         "audit": audit,
         "token": create_admin_access_token(str(user.id), str(org.id), user.role.value),
         "org_token": "acme-org-token-secret-key-32chars-min",
+        "agent_session_token": agent_session_token,
     }
 
 
@@ -225,11 +229,13 @@ async def tenant_b(db_session: AsyncSession) -> dict:
             max_prompts_per_day=1000,
             audit_retention_days=90,
         )
+        agent_session_token = generate_token(48)
         agent = Agent(
             id=uuid.uuid4(),
             org_id=org.id,
             hostname="beta-ws-01",
             status=AgentStatus.ONLINE,
+            session_token_hash=hash_token(agent_session_token),
         )
         audit = AuditEvent(
             id=uuid.uuid4(),
@@ -247,6 +253,7 @@ async def tenant_b(db_session: AsyncSession) -> dict:
         "audit": audit,
         "token": create_admin_access_token(str(user.id), str(org.id), user.role.value),
         "org_token": "beta-org-token-secret-key-32chars-min",
+        "agent_session_token": agent_session_token,
     }
 
 

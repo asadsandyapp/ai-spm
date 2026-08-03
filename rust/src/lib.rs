@@ -31,3 +31,10 @@ pub const SERVICE_DISPLAY_NAME: &str = "AI-SPM DLP Agent";
 /// installs the unit file there, this module only enables/starts it.
 #[cfg(target_os = "linux")]
 pub const SYSTEMD_UNIT_NAME: &str = "ai-spm-dlp-agent.service";
+
+/// Dedicated unprivileged system user `agentd` runs as (see `User=`/`Group=`
+/// in the `.service` file). Created by `postinst` before `agentctl install
+/// --full` runs; referenced here so `agentctl`'s post-install chown of the
+/// state/log directories can't drift from what the unit file actually uses.
+#[cfg(target_os = "linux")]
+pub const SERVICE_USER: &str = "ai-spm-dlp-agent";

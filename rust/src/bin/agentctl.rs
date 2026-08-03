@@ -47,6 +47,11 @@ enum Command {
     /// elevated/root process. Per-user state from `enable-proxy` is
     /// untouched - each user should run `disable-proxy` themselves first.
     Uninstall,
+    /// Register this agent with the AI-SPM control-plane using the `[cloud]`
+    /// install token. `install --full` already attempts this once; use this
+    /// to retry by hand (e.g. the backend was unreachable at install time)
+    /// or to re-register from scratch after deleting `data/cloud/registration.json`.
+    Register,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -67,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         Command::Status => status(&load_config(&cli.config)?),
         Command::Install { full } => install_full(&load_config(&cli.config)?, &cli.config, full),
         Command::Uninstall => uninstall_full(),
+        Command::Register => register_cloud(&load_config(&cli.config)?),
     }
 }
 
@@ -303,6 +309,13 @@ fn install_full(config: &AgentConfig, config_path: &Path, full: bool) -> anyhow:
 
         install_firefox_trust();
 
+        // The service runs as the unprivileged `agent::SERVICE_USER`, not
+        // root (see the `.service` file's User=/hardening directives) - but
+        // everything generated above (the local MITM CA, its state dir) was
+        // just written by *this* root process. Without this chown, the
+        // service's very first start would fail to read its own CA key.
+        chown_state_dirs(config).context("handing state/log directories to the service user")?;
+
         agent::systemd::install().context("enabling the ai-spm-dlp-agent systemd service")?;
         println!("Enabled and started the 'ai-spm-dlp-agent' systemd service (auto-start, restart on failure).");
         println!(
@@ -317,6 +330,60 @@ fn install_full(config: &AgentConfig, config_path: &Path, full: bool) -> anyhow:
         println!("Full install is only implemented on Windows and Linux.");
     }
 
+    if config.cloud.is_configured() {
+        // Best-effort, matching `install_firefox_trust`'s tone above: a
+        // backend that's unreachable right now must not fail the install -
+        // `agentd`'s own startup retry (see `runtime.rs::register_with_retry`)
+        // picks this up and keeps trying once the service is running.
+        match register_cloud_once(config) {
+            Ok(response) => println!(
+                "Registered with the AI-SPM control-plane (agent_id: {}).",
+                response.id
+            ),
+            Err(err) => println!(
+                "Cloud registration failed ({err}); agentd will keep retrying in the background \
+                 once it starts. Run `agentctl register` to retry by hand."
+            ),
+        }
+    }
+
+    Ok(())
+}
+
+/// Hands the CA/PAC state dir and the log dir to [`agent::SERVICE_USER`],
+/// recursively, so the sandboxed systemd service (which runs as that user,
+/// not root - see the `.service` file) can read the CA key this same
+/// (root) process just generated, and write its own logs/PAC file. Derived
+/// from `config` rather than hardcoding `/var/lib/ai-spm-dlp-agent` and
+/// `/var/log/ai-spm-dlp-agent` directly, so a customized packaging config
+/// doesn't silently leave the wrong directory root-owned.
+#[cfg(target_os = "linux")]
+fn chown_state_dirs(config: &AgentConfig) -> anyhow::Result<()> {
+    let mut dirs = vec![config.logging.file_dir.clone()];
+    if let Some(parent) = config.ca.cert_path.parent() {
+        dirs.push(parent.to_path_buf());
+    }
+    if let Some(parent) = config.sysnet.pac_path.parent() {
+        dirs.push(parent.to_path_buf());
+    }
+
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let owner = format!("{0}:{0}", agent::SERVICE_USER);
+        let output = std::process::Command::new("chown")
+            .args(["-R", &owner])
+            .arg(&dir)
+            .output()
+            .with_context(|| format!("spawning chown for {}", dir.display()))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "chown -R {owner} {} failed: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     Ok(())
 }
 
@@ -394,5 +461,52 @@ fn status(config: &AgentConfig) -> anyhow::Result<()> {
     println!("  ca key:  {} (exists: {})", config.ca.key_path.display(), config.ca.key_path.exists());
     println!("  policy:  {} (exists: {})", config.policy.source.display(), config.policy.source.exists());
     println!("  target domains: {:?}", config.targets.domains);
+
+    if !config.cloud.is_configured() {
+        println!("  cloud:   not configured (standalone mode)");
+    } else {
+        let state_path = config.cloud.state_dir.join("registration.json");
+        match agent_core::registration::load_registration_state(&state_path) {
+            Some(state) => println!(
+                "  cloud:   registered (agent_id: {}, gateway: {})",
+                state.agent_id,
+                config.cloud.gateway_url.as_deref().unwrap_or("?"),
+            ),
+            None => println!(
+                "  cloud:   configured but not yet registered (gateway: {}) - run `agentctl register`",
+                config.cloud.gateway_url.as_deref().unwrap_or("?"),
+            ),
+        }
+    }
+
     Ok(())
+}
+
+/// `agentctl register` - explicit manual trigger, for retrying after a
+/// failed `install --full` attempt or re-registering by hand.
+fn register_cloud(config: &AgentConfig) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        config.cloud.is_configured(),
+        "[cloud] is not configured (need both gateway_url and install_token) - nothing to register."
+    );
+    let response = register_cloud_once(config)?;
+    println!(
+        "Registered with the AI-SPM control-plane (agent_id: {}, org_id: {}).",
+        response.id, response.org_id
+    );
+    Ok(())
+}
+
+/// Runs one `register_and_persist` attempt to completion. `agentctl`'s
+/// `main()` is synchronous everywhere else (none of its other subcommands
+/// need async I/O), so this spins up a throwaway single-threaded runtime
+/// just for this one call rather than making the whole binary async.
+fn register_cloud_once(config: &AgentConfig) -> anyhow::Result<agent_core::RegisterResponse> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime for cloud registration")?;
+    runtime
+        .block_on(agent_core::registration::register_and_persist(&config.cloud))
+        .map_err(|err| anyhow::anyhow!(err))
 }

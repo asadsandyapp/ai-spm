@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_core::config::AgentConfig;
+use agent_core::config::{AgentConfig, OversizedAction};
 use agent_core::policy::Action;
 use agent_dlp::{highest_priority_action, mask_body, scan_body, Match, RuleSet};
 use http::{header, Request, Response, StatusCode};
@@ -59,9 +59,56 @@ impl HttpHandler for DlpHandler {
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
 
-        let collected = match body.collect().await {
+        let max_body_bytes = self.config.proxy.max_body_bytes;
+
+        // Content-Length, when present, decides the outcome before reading a
+        // single byte - the common case for real API clients, and the
+        // cheapest possible path either way: `block` needs no body at all,
+        // and `log` can forward the original, still-unread body stream
+        // instead of buffering it just to copy it straight back out.
+        let declared_len = parts
+            .headers
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok());
+
+        if let Some(len) = declared_len {
+            if len > max_body_bytes {
+                return match self.config.proxy.on_oversized {
+                    OversizedAction::Block => {
+                        tracing::warn!(host, len, max = max_body_bytes, "declared Content-Length exceeds max_body_bytes, blocking (on_oversized=block)");
+                        RequestOrResponse::Response(oversized_block_response())
+                    }
+                    OversizedAction::Log => {
+                        tracing::warn!(host, len, max = max_body_bytes, "declared Content-Length exceeds max_body_bytes, passing through unscanned without buffering it");
+                        RequestOrResponse::Request(Request::from_parts(parts, body))
+                    }
+                };
+            }
+        }
+
+        // Bounds memory regardless of what Content-Length claims (or if
+        // it's absent entirely - chunked transfer-encoding): plain
+        // `body.collect()` buffers however much the client sends before
+        // this code ever gets a chance to check anything, i.e. an
+        // unbounded-memory DoS from a single request. `Limited` aborts as
+        // soon as more than `max_body_bytes` has actually been read,
+        // capping worst-case memory to that limit no matter what the
+        // client claims or sends.
+        let collected = match http_body_util::Limited::new(body, max_body_bytes).collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(err) => {
+                if err.downcast_ref::<http_body_util::LengthLimitError>().is_some() {
+                    // The stream itself exceeded the limit - no declared
+                    // Content-Length, or one that understated the real
+                    // size. Either way part of the body has already been
+                    // discarded to stay memory-bounded, so there's no
+                    // intact "original body" left to forward for `log` -
+                    // block unconditionally rather than risk sending a
+                    // truncated request upstream.
+                    tracing::warn!(host, max = max_body_bytes, "request body exceeded max_body_bytes while streaming (no/understated Content-Length); blocking regardless of on_oversized");
+                    return RequestOrResponse::Response(oversized_block_response());
+                }
                 // Forwarding upstream here would mean sending a request with
                 // a body we know is truncated/corrupted (an empty body, not
                 // "the real body, unread") — silently mutating what the
@@ -72,17 +119,6 @@ impl HttpHandler for DlpHandler {
                 return RequestOrResponse::Response(body_read_failed_response());
             }
         };
-
-        let max_body_bytes = self.config.proxy.max_body_bytes;
-        if collected.len() > max_body_bytes {
-            tracing::warn!(
-                host,
-                len = collected.len(),
-                max = max_body_bytes,
-                "request body exceeds max_body_bytes, passing through unscanned"
-            );
-            return RequestOrResponse::Request(Request::from_parts(parts, Body::from(collected)));
-        }
 
         // Raw-traffic trace: opt-in only (RUST_LOG must enable `trace` for
         // agent_proxy), and separate from the "dlp match" log above, which
@@ -169,6 +205,21 @@ fn body_read_failed_response() -> Response<Body> {
 
     Response::builder()
         .status(StatusCode::BAD_GATEWAY)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(bytes))
+        .expect("building a static response cannot fail")
+}
+
+fn oversized_block_response() -> Response<Body> {
+    let body = serde_json::json!({
+        "blocked_by": "AI-SPM DLP Agent",
+        "message": "This request's body exceeds the configured size limit and was blocked \
+                    (on_oversized = \"block\") rather than forwarded unscanned.",
+    });
+    let bytes = serde_json::to_vec(&body).unwrap_or_default();
+
+    Response::builder()
+        .status(StatusCode::FORBIDDEN)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(bytes))
         .expect("building a static response cannot fail")

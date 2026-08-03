@@ -49,11 +49,17 @@ async def test_agent_register_and_heartbeat(client, tenant_a):
         },
     )
     assert reg.status_code == 201
-    agent_id = reg.json()["id"]
+    reg_body = reg.json()
+    agent_id = reg_body["id"]
+    session_token = reg_body["session_token"]
 
     hb = await client.post(
         "/agent/v1/heartbeat",
-        headers={**headers, "X-Agent-ID": agent_id},
+        headers={
+            **headers,
+            "X-Agent-ID": agent_id,
+            "Authorization": f"Bearer {session_token}",
+        },
     )
     assert hb.status_code == 200
 
@@ -74,25 +80,29 @@ async def test_agent_unregister_removes_fleet_row(client, tenant_a):
         },
     )
     assert reg.status_code == 201
-    agent_id = reg.json()["id"]
+    reg_body = reg.json()
+    agent_id = reg_body["id"]
+    auth_headers = {
+        **headers,
+        "X-Agent-ID": agent_id,
+        "Authorization": f"Bearer {reg_body['session_token']}",
+    }
 
-    unreg = await client.post(
-        "/agent/v1/unregister",
-        headers={**headers, "X-Agent-ID": agent_id},
-    )
+    unreg = await client.post("/agent/v1/unregister", headers=auth_headers)
     assert unreg.status_code == 204
 
-    again = await client.post(
-        "/agent/v1/unregister",
-        headers={**headers, "X-Agent-ID": agent_id},
-    )
-    assert again.status_code == 404
+    # The agent row (and its session_token_hash) is gone now, so the same
+    # token can no longer authenticate at all - 401 from the auth check,
+    # not 404 from the route handler (which it never reaches).
+    again = await client.post("/agent/v1/unregister", headers=auth_headers)
+    assert again.status_code == 401
 
 
 async def test_prompt_pipeline_masks_pii(client, tenant_a):
     headers = {
         "X-Org-ID": str(tenant_a["org"].id),
         "X-Agent-ID": str(tenant_a["agent"].id),
+        "Authorization": f"Bearer {tenant_a['agent_session_token']}",
         "Content-Type": "application/json",
     }
     response = await client.post(

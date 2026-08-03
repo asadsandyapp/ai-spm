@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::error::CoreError;
 
@@ -14,6 +15,8 @@ pub struct AgentConfig {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub sysnet: SysnetConfig,
+    #[serde(default)]
+    pub cloud: CloudConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +117,76 @@ fn default_pac_port() -> u16 {
     8444
 }
 
+/// Cloud/fleet registration - opt-in. An agent with no `[cloud]` section (or
+/// with either field blank) stays fully standalone: nothing here is read
+/// unless both fields are set, so existing local-only deployments are
+/// unaffected.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CloudConfig {
+    /// Base URL of the AI-SPM control-plane gateway, e.g.
+    /// `https://gateway.example.com` (no trailing slash).
+    #[serde(default)]
+    pub gateway_url: Option<String>,
+    /// The company's install token, as distributed by an admin: a single
+    /// opaque string shaped `<org_id-uuid>.<secret>` - see
+    /// [`CloudConfig::parse_install_token`] for why it's one field instead of
+    /// two.
+    #[serde(default)]
+    pub install_token: Option<String>,
+    /// Where registration state (`registration.json`) and the issued mTLS
+    /// material (`agent.crt`/`agent.key`/`ca.crt`) are persisted. Resolved
+    /// against the config file's own directory by [`AgentConfig::load`],
+    /// same as `ca.cert_path`/`policy.source` etc.
+    #[serde(default = "default_cloud_state_dir")]
+    pub state_dir: PathBuf,
+}
+
+fn default_cloud_state_dir() -> PathBuf {
+    PathBuf::from("data/cloud")
+}
+
+impl CloudConfig {
+    /// True once both `gateway_url` and `install_token` are set - the signal
+    /// to attempt registration at all.
+    pub fn is_configured(&self) -> bool {
+        self.gateway_url.as_deref().is_some_and(|s| !s.is_empty())
+            && self.install_token.as_deref().is_some_and(|s| !s.is_empty())
+    }
+
+    /// Split `install_token` into the `org_id` the backend's `X-Org-ID`
+    /// header needs and the `org_token` secret it validates against - one
+    /// token for an admin to distribute/paste, split locally so the wire
+    /// contract (which needs both pieces separately) doesn't leak into the
+    /// install UX.
+    pub fn parse_install_token(&self) -> Result<(Uuid, String), CoreError> {
+        let token = self
+            .install_token
+            .as_deref()
+            .ok_or(CoreError::InvalidInstallToken {
+                reason: "install_token is not set".to_string(),
+            })?;
+
+        let (org_id, secret) = token.split_once('.').ok_or(CoreError::InvalidInstallToken {
+            reason: "expected \"<org_id>.<secret>\", no '.' separator found".to_string(),
+        })?;
+
+        let org_id = Uuid::parse_str(org_id).map_err(|source| CoreError::InvalidInstallToken {
+            reason: format!("{org_id:?} is not a valid org_id UUID: {source}"),
+        })?;
+
+        if secret.len() < 32 {
+            return Err(CoreError::InvalidInstallToken {
+                reason: format!(
+                    "secret portion is {} chars, expected at least 32",
+                    secret.len()
+                ),
+            });
+        }
+
+        Ok((org_id, secret.to_string()))
+    }
+}
+
 impl AgentConfig {
     /// Load and parse `path`, then resolve every path field it contains
     /// relative to `path`'s own parent directory rather than leaving them
@@ -143,6 +216,7 @@ impl AgentConfig {
         config.policy.source = resolve_against(base, &config.policy.source);
         config.logging.file_dir = resolve_against(base, &config.logging.file_dir);
         config.sysnet.pac_path = resolve_against(base, &config.sysnet.pac_path);
+        config.cloud.state_dir = resolve_against(base, &config.cloud.state_dir);
 
         Ok(config)
     }
@@ -210,6 +284,58 @@ mod tests {
         let cfg = sample_config();
         assert_eq!(cfg.proxy.max_body_bytes, 10 * 1024 * 1024);
         assert_eq!(cfg.logging.level, "info");
+    }
+
+    #[test]
+    fn cloud_section_absent_means_not_configured() {
+        let cfg = sample_config();
+        assert!(!cfg.cloud.is_configured());
+    }
+
+    #[test]
+    fn cloud_parse_install_token_splits_org_id_and_secret() {
+        let org_id = Uuid::new_v4();
+        let secret = "s".repeat(32);
+        let cloud = CloudConfig {
+            gateway_url: Some("https://gateway.example.com".to_string()),
+            install_token: Some(format!("{org_id}.{secret}")),
+            ..Default::default()
+        };
+        assert!(cloud.is_configured());
+
+        let (parsed_org_id, parsed_secret) = cloud.parse_install_token().unwrap();
+        assert_eq!(parsed_org_id, org_id);
+        assert_eq!(parsed_secret, secret);
+    }
+
+    #[test]
+    fn cloud_parse_install_token_rejects_missing_separator() {
+        let cloud = CloudConfig {
+            gateway_url: Some("https://gateway.example.com".to_string()),
+            install_token: Some("no-dot-here".to_string()),
+            ..Default::default()
+        };
+        assert!(cloud.parse_install_token().is_err());
+    }
+
+    #[test]
+    fn cloud_parse_install_token_rejects_invalid_org_id() {
+        let cloud = CloudConfig {
+            gateway_url: Some("https://gateway.example.com".to_string()),
+            install_token: Some(format!("not-a-uuid.{}", "s".repeat(32))),
+            ..Default::default()
+        };
+        assert!(cloud.parse_install_token().is_err());
+    }
+
+    #[test]
+    fn cloud_parse_install_token_rejects_short_secret() {
+        let cloud = CloudConfig {
+            gateway_url: Some("https://gateway.example.com".to_string()),
+            install_token: Some(format!("{}.tooshort", Uuid::new_v4())),
+            ..Default::default()
+        };
+        assert!(cloud.parse_install_token().is_err());
     }
 
     fn temp_dir(name: &str) -> PathBuf {

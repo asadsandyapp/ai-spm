@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,10 @@ class CertService:
                 check=True,
                 capture_output=True,
             )
+            # openssl applies no permission restriction of its own (subject
+            # to umask - typically world-readable); this key can mint a cert
+            # for any org/agent SPIFFE identity, so it must be owner-only.
+            os.chmod(ca_key, 0o600)
         return ca_crt, ca_key
 
     def issue_agent_cert(
@@ -111,7 +116,9 @@ class CertService:
             out_dir = self.certs_dir / "issued"
             out_dir.mkdir(exist_ok=True)
             (out_dir / f"{name}.crt").write_text(cert_pem)
-            (out_dir / f"{name}.key").write_text(key_pem)
+            issued_key_path = out_dir / f"{name}.key"
+            issued_key_path.write_text(key_pem)
+            os.chmod(issued_key_path, 0o600)
 
         expires_at = datetime.now(UTC) + timedelta(days=90)
         return {

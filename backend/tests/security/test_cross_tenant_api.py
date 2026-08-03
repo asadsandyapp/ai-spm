@@ -45,6 +45,7 @@ async def test_org_id_body_mismatch_rejected(client, tenant_a, tenant_b):
         headers={
             "X-Org-ID": str(tenant_a["org"].id),
             "X-Agent-ID": str(tenant_a["agent"].id),
+            "Authorization": f"Bearer {tenant_a['agent_session_token']}",
             "Content-Type": "application/json",
         },
         json={
@@ -56,6 +57,77 @@ async def test_org_id_body_mismatch_rejected(client, tenant_a, tenant_b):
     )
     assert response.status_code == 403
     assert "org_id mismatch" in response.json()["detail"]
+
+
+async def test_agent_session_token_required(client, tenant_a):
+    """Closes the header-forgery gap: X-Org-ID/X-Agent-ID alone, with no
+    bearer token at all, must not be enough to authenticate."""
+    response = await client.post(
+        "/agent/v1/prompt",
+        headers={
+            "X-Org-ID": str(tenant_a["org"].id),
+            "X-Agent-ID": str(tenant_a["agent"].id),
+            "Content-Type": "application/json",
+        },
+        json={
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+    assert response.status_code == 401
+
+
+async def test_agent_cannot_use_another_agents_session_token(client, tenant_a, tenant_b):
+    """A stolen/guessed org+agent UUID pair is not enough on its own, and
+    a *different* agent's real token doesn't transfer either - the token
+    must actually hash-match the specific agent named in the headers."""
+    response = await client.post(
+        "/agent/v1/prompt",
+        headers={
+            "X-Org-ID": str(tenant_a["org"].id),
+            "X-Agent-ID": str(tenant_a["agent"].id),
+            "Authorization": f"Bearer {tenant_b['agent_session_token']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+    assert response.status_code == 401
+
+
+async def test_revoked_agent_rejected(client, tenant_a, db_session):
+    """A revoked agent must be rejected on every endpoint, not just
+    heartbeat - even with its own genuinely-correct session token."""
+    from ai_spm.domain.enums import AgentStatus
+    from ai_spm.domain.models import Agent
+    from ai_spm.infrastructure.db.session import get_platform_session
+    from sqlalchemy import select
+
+    async with get_platform_session() as session:
+        result = await session.execute(select(Agent).where(Agent.id == tenant_a["agent"].id))
+        agent = result.scalar_one()
+        agent.status = AgentStatus.REVOKED
+        await session.commit()
+
+    response = await client.post(
+        "/agent/v1/prompt",
+        headers={
+            "X-Org-ID": str(tenant_a["org"].id),
+            "X-Agent-ID": str(tenant_a["agent"].id),
+            "Authorization": f"Bearer {tenant_a['agent_session_token']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+    assert response.status_code == 401
 
 
 async def test_agent_wrong_org_token_rejected(client, tenant_a, tenant_b):

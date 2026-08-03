@@ -47,6 +47,12 @@ pub struct AgentRegisterWithCertResponse {
     pub ca_certificate_pem: String,
     #[serde(default)]
     pub cert_expires_at: Option<String>,
+    /// Bearer token required on every subsequent /agent/v1/* call - no
+    /// #[serde(default)] here deliberately: a registration response without
+    /// one is useless (nothing else can ever authenticate), so a missing
+    /// field should fail deserialization loudly rather than silently
+    /// leaving the agent unable to heartbeat/submit prompts later.
+    pub session_token: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -145,6 +151,7 @@ pub struct GatewayClient {
     base_url: String,
     org_id: Uuid,
     agent_id: RwLock<Option<Uuid>>,
+    session_token: RwLock<Option<String>>,
     org_token: String,
     agent_version: String,
     mtls_cert_path: String,
@@ -169,6 +176,7 @@ impl GatewayClient {
             base_url: config.gateway_url.clone(),
             org_id: config.org_id,
             agent_id: RwLock::new(config.agent_id),
+            session_token: RwLock::new(config.session_token.clone()),
             org_token: config.org_token.clone(),
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
             mtls_cert_path,
@@ -188,6 +196,10 @@ impl GatewayClient {
 
     pub fn set_agent_id(&self, agent_id: Uuid) {
         *self.agent_id.write().expect("agent_id lock poisoned") = Some(agent_id);
+    }
+
+    pub fn set_session_token(&self, session_token: String) {
+        *self.session_token.write().expect("session_token lock poisoned") = Some(session_token);
     }
 
     /// Persist PEM material from registration to the configured cert paths.
@@ -330,6 +342,17 @@ impl GatewayClient {
 
     fn auth_headers(&self) -> Result<HeaderMap, GatewayError> {
         let agent_id = self.agent_id().ok_or(GatewayError::NotRegistered)?;
+        // The backend now requires this on every /agent/v1/* call other
+        // than /register (org_id/agent_id headers alone are no longer
+        // trusted - see backend/src/ai_spm/tenant/middleware.py's
+        // _verify_agent_session_token). Missing it is the same
+        // "not usably registered yet" condition as a missing agent_id.
+        let session_token = self
+            .session_token
+            .read()
+            .expect("session_token lock poisoned")
+            .clone()
+            .ok_or(GatewayError::NotRegistered)?;
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -340,6 +363,11 @@ impl GatewayClient {
         headers.insert(
             "X-Agent-ID",
             HeaderValue::from_str(&agent_id.to_string())
+                .map_err(|e| GatewayError::InvalidResponse(e.to_string()))?,
+        );
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {session_token}"))
                 .map_err(|e| GatewayError::InvalidResponse(e.to_string()))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -402,6 +430,7 @@ impl GatewayClient {
         }
 
         self.set_agent_id(registration.id);
+        self.set_session_token(registration.session_token.clone());
         debug!(agent_id = %registration.id, "agent registered with gateway");
 
         Ok(AgentResponse {
@@ -498,5 +527,86 @@ impl GatewayClient {
         }
 
         serde_json::from_str(&body_text).map_err(|e| GatewayError::InvalidResponse(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn base_config() -> Config {
+        Config {
+            gateway_url: "http://127.0.0.1:0".to_string(),
+            org_token: "x".repeat(32),
+            org_id: Uuid::new_v4(),
+            agent_id: None,
+            session_token: None,
+            proxy_listen: "127.0.0.1:0".parse().unwrap(),
+            mtls_cert_path: None,
+            mtls_key_path: None,
+            ca_cert_path: None,
+            mitm_ca_dir: None,
+            auto_configure_endpoint: false,
+            auto_install_ca: false,
+            auto_configure_proxy: false,
+            transparent_enabled: false,
+            transparent_listen: "127.0.0.1:8443".parse().unwrap(),
+            auto_configure_network: false,
+            explicit_proxy_enabled: false,
+            socket_mark: crate::proxy::DEFAULT_SOCKET_MARK,
+            mitm_domains: Vec::new(),
+            local_api_enabled: false,
+            local_api_listen: "127.0.0.1:8092".parse().unwrap(),
+        }
+    }
+
+    // Regression tests for the backend fix requiring a bearer session
+    // token on every /agent/v1/* call other than /register - X-Org-ID/
+    // X-Agent-ID headers alone are no longer trusted server-side, so the
+    // client must not be able to build an authenticated request without one.
+
+    #[test]
+    fn auth_headers_requires_agent_id() {
+        let client = GatewayClient::new(&base_config()).unwrap();
+        assert!(matches!(client.auth_headers(), Err(GatewayError::NotRegistered)));
+    }
+
+    #[test]
+    fn auth_headers_requires_session_token_even_with_agent_id() {
+        let mut config = base_config();
+        config.agent_id = Some(Uuid::new_v4());
+        // session_token intentionally left None.
+        let client = GatewayClient::new(&config).unwrap();
+        assert!(matches!(client.auth_headers(), Err(GatewayError::NotRegistered)));
+    }
+
+    #[test]
+    fn auth_headers_includes_bearer_token_when_fully_registered() {
+        let mut config = base_config();
+        config.agent_id = Some(Uuid::new_v4());
+        config.session_token = Some("secrettoken123".to_string());
+        let client = GatewayClient::new(&config).unwrap();
+
+        let headers = client.auth_headers().unwrap();
+        assert_eq!(headers.get("Authorization").unwrap(), "Bearer secrettoken123");
+        assert!(headers.contains_key("X-Org-ID"));
+        assert!(headers.contains_key("X-Agent-ID"));
+    }
+
+    #[test]
+    fn register_response_without_session_token_fails_to_deserialize() {
+        // Guards against silently regressing to a version of the backend
+        // response that doesn't send this field - see the type's own
+        // deliberate lack of #[serde(default)] on session_token.
+        let body = serde_json::json!({
+            "id": Uuid::new_v4(),
+            "org_id": Uuid::new_v4(),
+            "hostname": "host",
+            "status": "active",
+        })
+        .to_string();
+        let result: Result<AgentRegisterWithCertResponse, _> = serde_json::from_str(&body);
+        assert!(result.is_err());
     }
 }

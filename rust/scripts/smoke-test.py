@@ -132,6 +132,18 @@ def main():
             if b"MASKED-EMAIL" not in forwarded:
                 failures.append("mask case: forwarded body doesn't contain the expected mask token")
 
+        # 3b. An RSA-format private key (not the PKCS#8 header the
+        #     private_key_block rule originally matched exclusively) must
+        #     also be blocked outright.
+        status = proxy_post(
+            args.proxy_host, args.proxy_port, "/blocked-rsa-key",
+            b'{"messages":[{"role":"user","content":"-----BEGIN RSA PRIVATE KEY-----\\nMIIBOgIBAAJBAK...\\n-----END RSA PRIVATE KEY-----"}]}',
+        )
+        if status != 403:
+            failures.append(f"RSA private key block case: expected HTTP 403, got {status}")
+        if any(b"BEGIN RSA PRIVATE KEY" in r for r in RecordingHandler.received):
+            failures.append("RSA private key block case: key material reached the upstream mock server")
+
         # 3. Clean content must pass through untouched.
         before = len(RecordingHandler.received)
         status = proxy_post(
