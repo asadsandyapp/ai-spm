@@ -4,6 +4,14 @@ Lightweight endpoint agent for the AI-SPM platform. Intercepts AI provider traff
 
 **Design targets:** &lt;30 MB idle RAM, modular crates, mTLS-ready architecture.
 
+## CI
+
+`.github/workflows/agent-ci.yml` builds and tests this workspace on both
+`windows-latest` and `ubuntu-latest` on every push/PR to `proxy` that
+touches `agent/**`. Installs the system deps the BoringSSL-based TLS stack
+(`boring`/`tokio-boring`/`hyper-boring`) needs to build from source
+(`libclang` for bindgen, `cmake`, `go`, `nasm`).
+
 ## Workspace Crates
 
 | Crate | Type | Purpose |
