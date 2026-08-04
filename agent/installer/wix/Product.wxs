@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AI-SPM Endpoint Agent - Windows MSI (WiX Toolset v3).
+
+  Packages the two release binaries built with the windows-service feature
+  enabled on agent-service (see agent/installer/wix/README.md for the exact
+  cargo build command):
+    - agent-service.exe -> registered as the "AiSpmAgent" Windows Service,
+      with SCM crash-recovery (restart on failure) so a crashed agent
+      doesn't leave the endpoint silently unprotected - see
+      agent/crates/agent-service/src/main.rs for the service-side half of
+      this (shared start_agent_tasks() between the SCM and ctrl-c paths).
+    - agent-tray.exe -> autostarts per-machine via an HKLM Run key so
+      whoever's logged in sees the Protected/Disconnected/Blocked tray
+      (see agent/crates/agent-tray).
+
+  UpgradeCode must stay constant across every future version of this
+  product - MajorUpgrade below depends on it to detect/replace prior
+  installs. Component GUIDs are fixed (not "*") since Windows Installer
+  needs stable component identity across upgrades, particularly for the
+  ServiceInstall-bearing component.
+
+  Build (from agent/installer/wix, WiX v3 on PATH):
+    candle -ext WixUtilExtension Product.wxs
+    light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <Product Id="*"
+           Name="AI-SPM Endpoint Agent"
+           Language="1033"
+           Version="0.1.0.0"
+           Manufacturer="AI-SPM Platform"
+           UpgradeCode="93E7E455-EFF2-4918-BC74-418C39F7C710">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Overridable at build time: `candle -dAgentServiceExe=path -dAgentTrayExe=path` -->
+    <?ifndef AgentServiceExe?>
+      <?define AgentServiceExe = "..\..\target\release\agent-service.exe" ?>
+    <?endif?>
+    <?ifndef AgentTrayExe?>
+      <?define AgentTrayExe = "..\..\target\release\agent-tray.exe" ?>
+    <?endif?>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="AISPM">
+          <Directory Id="AgentDir" Name="Agent" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="AgentDir">
+      <Component Id="AgentServiceComponent" Guid="451006B0-F62D-4D6C-B96B-D62B70DE03D9" Win64="yes">
+        <File Id="AgentServiceExeFile" Source="$(var.AgentServiceExe)" KeyPath="yes" />
+
+        <ServiceInstall
+          Id="AgentServiceInstall"
+          Name="AiSpmAgent"
+          DisplayName="AI-SPM Endpoint Agent"
+          Description="Intercepts AI provider traffic and forwards prompts through the AI-SPM gateway."
+          Type="ownProcess"
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal">
+          <!-- Matches systemd's Restart=on-failure (deploy/systemd/aispm-agent.service) -->
+          <util:ServiceConfig
+            FirstFailureActionType="restart"
+            SecondFailureActionType="restart"
+            ThirdFailureActionType="restart"
+            RestartServiceDelayInSeconds="30"
+            ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl
+          Id="AgentServiceControl"
+          Name="AiSpmAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+
+      <Component Id="AgentTrayComponent" Guid="9AC0DAA6-91C8-48FB-92D8-ADAC9BC81B6F" Win64="yes">
+        <File Id="AgentTrayExeFile" Source="$(var.AgentTrayExe)" KeyPath="yes" />
+        <!-- Per-machine autostart: whoever logs in sees the tray. HKLM (not
+             HKCU) because this is a perMachine install with no per-user
+             component - matches the service running as LocalSystem. -->
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Run"
+          Name="AiSpmAgentTray"
+          Type="string"
+          Value="&quot;[#AgentTrayExeFile]&quot;" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="MainFeature" Title="AI-SPM Agent" Level="1">
+      <ComponentRef Id="AgentServiceComponent" />
+      <ComponentRef Id="AgentTrayComponent" />
+    </Feature>
+  </Product>
+</Wix>

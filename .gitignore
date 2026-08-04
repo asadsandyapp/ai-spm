@@ -29,6 +29,9 @@ infrastructure/certs/*.srl
 
 # Build output
 dist/
+*.msi
+*.wixobj
+*.wixpdb
 
 # IDE / OS
 .idea/
