@@ -9,7 +9,9 @@ pub mod heartbeat;
 pub mod local_api;
 pub mod network_setup;
 pub mod proxy;
+pub mod status;
 
 pub use config::Config;
 pub use gateway::GatewayClient;
 pub use proxy::ensure_crypto_provider;
+pub use status::{AgentStatus, SharedAgentStatus};

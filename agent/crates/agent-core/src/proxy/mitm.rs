@@ -207,6 +207,9 @@ async fn handle_mitm_request(
                         let message = response
                             .blocked_reason
                             .unwrap_or_else(|| "Request blocked by AI-SPM security policy".into());
+                        state
+                            .status
+                            .record_block(parsed.provider.clone(), message.clone());
                         return Ok(block_response(&message));
                     }
                     Ok(response) => {

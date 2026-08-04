@@ -6,6 +6,7 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 use crate::gateway::{GatewayClient, GatewayError};
+use crate::status::SharedAgentStatus;
 
 /// Default heartbeat interval per IMPLEMENTATION_ROADMAP (60 seconds).
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -19,6 +20,7 @@ pub enum HeartbeatError {
 /// Run the periodic heartbeat loop until the shutdown signal fires.
 pub async fn run_heartbeat_loop(
     client: Arc<GatewayClient>,
+    status: SharedAgentStatus,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), HeartbeatError> {
     info!(
@@ -43,21 +45,29 @@ pub async fn run_heartbeat_loop(
             }
             _ = interval.tick() => {
                 if client.agent_id().is_none() {
+                    status.set_connected(false);
                     debug!("heartbeat skipped: agent not registered yet");
                     continue;
                 }
                 match client.heartbeat().await {
-                    Ok(()) => debug!("heartbeat sent"),
-                    Err(GatewayError::Api { status, .. }) if status.as_u16() == 404 => {
+                    Ok(()) => {
+                        status.set_connected(true);
+                        debug!("heartbeat sent");
+                    }
+                    Err(GatewayError::Api { status: http_status, .. }) if http_status.as_u16() == 404 => {
                         // Our record was deleted on the gateway (e.g. admin removed it).
                         // Re-register so the agent reappears in the fleet and keeps protecting.
+                        status.set_connected(false);
                         warn!("gateway reports agent record missing — re-registering");
                         match client.register().await {
                             Ok(agent) => info!(agent_id = %agent.id, "re-registered after record deletion"),
                             Err(reg_err) => error!(error = %reg_err, "re-registration failed; will retry"),
                         }
                     }
-                    Err(err) => error!(error = %err, "heartbeat failed"),
+                    Err(err) => {
+                        status.set_connected(false);
+                        error!(error = %err, "heartbeat failed");
+                    }
                 }
             }
         }
@@ -105,8 +115,9 @@ mod tests {
     async fn heartbeat_loop_exits_on_shutdown_without_agent_id() {
         let config = test_config(None);
         let client = Arc::new(GatewayClient::new(&config).unwrap());
+        let status = crate::status::AgentStatus::shared();
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(run_heartbeat_loop(client, rx));
+        let handle = tokio::spawn(run_heartbeat_loop(client, status, rx));
         tx.send(true).unwrap();
         handle.await.unwrap().unwrap();
     }

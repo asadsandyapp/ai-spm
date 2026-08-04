@@ -13,6 +13,7 @@ frontend/dist/
 
 # Rust
 agent/target/
+agent/crates/agent-tray/gen/
 
 # Secrets & env
 .env

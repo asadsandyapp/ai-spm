@@ -30,6 +30,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::gateway::{GatewayClient, PromptRequest};
+use crate::status::SharedAgentStatus;
 use ca::MitmCertificateAuthority;
 use upstream::build_chrome_upstream_client;
 use tcp::connect_marked;
@@ -74,6 +75,7 @@ pub fn build_proxy_state(
     gateway: Arc<GatewayClient>,
     ca_dir: PathBuf,
     mitm_domains: Vec<String>,
+    status: SharedAgentStatus,
 ) -> Result<Arc<ProxyState>, ProxyError> {
     ensure_crypto_provider();
     let ca = Arc::new(MitmCertificateAuthority::load_or_create(&ca_dir)?);
@@ -93,6 +95,7 @@ pub fn build_proxy_state(
         ca,
         upstream,
         mitm_domains,
+        status,
     }))
 }
 
@@ -150,7 +153,7 @@ pub async fn run_proxy(
     ca_dir: PathBuf,
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), ProxyError> {
-    let state = build_proxy_state(gateway, ca_dir, Vec::new())?;
+    let state = build_proxy_state(gateway, ca_dir, Vec::new(), crate::status::AgentStatus::shared())?;
     run_explicit_proxy(listen, state, shutdown).await
 }
 
@@ -261,6 +264,7 @@ async fn handle_ai_request(
             let message = response
                 .blocked_reason
                 .unwrap_or_else(|| "Request blocked by AI-SPM policy".to_string());
+            state.status.record_block(provider.clone(), message.clone());
             proxy_status(StatusCode::FORBIDDEN, &message)
         }
         Ok(response) => {
@@ -407,6 +411,7 @@ pub struct ProxyState {
     pub ca: Arc<MitmCertificateAuthority>,
     pub upstream: upstream::HttpClient,
     pub mitm_domains: Vec<String>,
+    pub status: SharedAgentStatus,
 }
 
 impl ProxyState {

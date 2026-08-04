@@ -23,6 +23,7 @@ use tracing::{debug, info, warn};
 
 use crate::gateway::{GatewayClient, PromptRequest, WebAuditRequest};
 use crate::proxy::ProxyError;
+use crate::status::SharedAgentStatus;
 
 const DEFAULT_CRX_PATH: &str = "/opt/ai-spm/ai-spm-prompt-guard.crx";
 const DEFAULT_EXT_ID_PATH: &str = "/opt/ai-spm/extension-id";
@@ -98,6 +99,7 @@ struct InspectResponse {
 pub async fn run_local_api(
     listen: SocketAddr,
     gateway: Arc<GatewayClient>,
+    status: SharedAgentStatus,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), ProxyError> {
     let listener = TcpListener::bind(listen).await.map_err(ProxyError::Bind)?;
@@ -117,11 +119,13 @@ pub async fn run_local_api(
             accept = listener.accept() => {
                 let (stream, _peer) = accept.map_err(ProxyError::Accept)?;
                 let gateway = Arc::clone(&gateway);
+                let status = Arc::clone(&status);
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req| {
                         let gateway = Arc::clone(&gateway);
-                        async move { handle(gateway, req).await }
+                        let status = Arc::clone(&status);
+                        async move { handle(gateway, status, req).await }
                     });
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         debug!(error = %err, "local API connection closed");
@@ -134,6 +138,7 @@ pub async fn run_local_api(
 
 async fn handle(
     gateway: Arc<GatewayClient>,
+    status: SharedAgentStatus,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     if req.method() == Method::OPTIONS {
@@ -147,10 +152,11 @@ async fn handle(
     let path = req.uri().path();
 
     match (method, path) {
+        (&Method::GET, "/status") => Ok(cors(json_response(StatusCode::OK, &status.snapshot()))),
         (&Method::GET, "/extension/updates.xml") => Ok(cors(serve_updates_xml())),
         (&Method::GET, "/extension/ai-spm-prompt-guard.crx") => Ok(cors(serve_crx().await)),
         (&Method::GET, "/extension/hook-ping") => Ok(cors(serve_hook_ping(req.uri().query()))),
-        (&Method::POST, "/inspect") => handle_inspect(gateway, req).await,
+        (&Method::POST, "/inspect") => handle_inspect(gateway, status, req).await,
         (&Method::POST, "/web-audit") => handle_web_audit(gateway, req).await,
         _ => Ok(cors(json_response(
             StatusCode::NOT_FOUND,
@@ -213,6 +219,7 @@ fn urlencoding_decode(raw: &str) -> String {
 
 async fn handle_inspect(
     gateway: Arc<GatewayClient>,
+    status: SharedAgentStatus,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let body = match req.into_body().collect().await {
@@ -274,6 +281,14 @@ async fn handle_inspect(
     match gateway.submit_prompt(&prompt).await {
         Ok(resp) => {
             info!(decision = %resp.decision, "web-UI prompt inspected");
+            if resp.decision == "blocked" {
+                status.record_block(
+                    prompt.provider.clone(),
+                    resp.blocked_reason
+                        .clone()
+                        .unwrap_or_else(|| "Request blocked by AI-SPM policy".to_string()),
+                );
+            }
             Ok(cors(json_response(
                 StatusCode::OK,
                 &InspectResponse {
