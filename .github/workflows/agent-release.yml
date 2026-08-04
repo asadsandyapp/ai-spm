@@ -1,0 +1,118 @@
+name: Agent Release
+
+# Publishes agent/'s production artifacts to a GitHub Release whenever an
+# `agent-v*` tag is pushed. Namespaced separately from rust-release.yml's
+# plain `v*` tags (rust/ and agent/ version independently and both currently
+# sit at 0.1.0, so a shared "v0.1.0" tag would collide between the two
+# products) - both workflows can then fire from the same commit without
+# racing to create/attach to the same release.
+#
+# Windows: reuses the exact WiX build steps agent-ci.yml's
+# installer-test-windows job already validates (candle/light against
+# agent/installer/wix/Product.wxs). Linux: agent/ has no package manager
+# packaging yet (unlike rust/'s cargo-deb .deb) - ships a plain tarball of
+# the release binary + the systemd unit + an example env file, matching
+# what agent/README.md's "Linux systemd" section already documents as the
+# manual install steps.
+on:
+  push:
+    tags:
+      - "agent-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NASM
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install LLVM/libclang
+        run: choco install llvm -y --no-progress
+
+      - name: Install WiX Toolset v3
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+
+      - name: Build agent-service (release, windows-service feature) and agent-tray (release)
+        working-directory: agent
+        run: cargo build --release -p agent-service --features windows-service -p agent-tray --verbose
+
+      - name: Build the MSI
+        working-directory: agent/installer/wix
+        run: |
+          candle -ext WixUtilExtension Product.wxs
+          light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj
+
+      - name: Package Windows release archive
+        shell: pwsh
+        run: |
+          $dest = "dist/windows"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $version = "${{ github.ref_name }}" -replace '^agent-v', ''
+          Compress-Archive -Path "agent/installer/wix/aispm-agent.msi" -DestinationPath "$dest/AISPM-Agent-windows-$version.zip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/windows/AISPM-Agent-windows-*.zip
+          generate_release_notes: true
+
+  release-linux:
+    name: Build and publish Linux release
+    # Runs after release-windows so both jobs upload to the same release
+    # instead of racing to create it twice.
+    needs: release-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build tools for BoringSSL (clang, cmake, go)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang libclang-dev cmake golang-go
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+
+      - name: Build agent-service (release)
+        working-directory: agent
+        run: cargo build --release -p agent-service --verbose
+
+      - name: Package Linux release archive
+        run: |
+          version="${GITHUB_REF_NAME#agent-v}"
+          pkg="aispm-agent-linux-$version"
+          mkdir -p "dist/linux/$pkg"
+          cp agent/target/release/agent-service "dist/linux/$pkg/"
+          cp deploy/systemd/aispm-agent.service "dist/linux/$pkg/"
+          cp agent/README.md "dist/linux/$pkg/"
+          cat > "dist/linux/$pkg/agent.env.example" <<'EOF'
+          AISPM_GATEWAY_URL=https://gateway.example.com
+          AISPM_ORG_TOKEN=your-org-token-at-least-32-chars-long
+          AISPM_ORG_ID=00000000-0000-0000-0000-000000000001
+          AISPM_LOG_JSON=true
+          EOF
+          tar -C dist/linux -czf "dist/linux/$pkg.tar.gz" "$pkg"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/linux/aispm-agent-linux-*.tar.gz
