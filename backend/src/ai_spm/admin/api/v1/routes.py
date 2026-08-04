@@ -21,6 +21,7 @@ from ai_spm.core.schemas import (
     OrgTokenRotateResponse,
     PiiDetectionPolicyResponse,
     PolicyResponse,
+    ReportSummaryResponse,
     ThreatEventResponse,
     TokenResponse,
     UpdatePiiDetectionRequest,
@@ -139,6 +140,32 @@ async def dashboard_threats(
     ctx = require_tenant_context()
     threats = await dashboard_service.get_threats(session, ctx.org_id, limit=limit)
     return [ThreatEventResponse(**t) for t in threats]
+
+
+@router.get("/reports/summary", response_model=ReportSummaryResponse)
+async def reports_summary(
+    session: AsyncSession = Depends(get_session),
+    days: int = Query(30, ge=1, le=365),
+    event_type: str | None = Query(None),
+    provider: str | None = Query(None),
+    device: str | None = Query(None),
+    entity: str | None = Query(None),
+) -> ReportSummaryResponse:
+    _require_permission("dashboard:read")
+    ctx = require_tenant_context()
+    try:
+        data = await dashboard_service.get_report(
+            session,
+            ctx.org_id,
+            days=days,
+            event_type=event_type or None,
+            provider=provider or None,
+            device=device or None,
+            entity=entity or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return ReportSummaryResponse(**data)
 
 
 @router.get("/agents", response_model=list[AgentResponse])

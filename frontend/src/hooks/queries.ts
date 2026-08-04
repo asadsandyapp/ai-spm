@@ -4,6 +4,7 @@ import type {
   CreatePolicyRequest,
   CreateUserRequest,
   LLMConfigRequest,
+  ReportQuery,
   UpdatePiiDetectionRequest,
   UpdatePolicyRequest,
 } from "@/types/api";
@@ -16,6 +17,8 @@ export const queryKeys = {
   policies: ["admin", "policies"] as const,
   piiDetections: ["admin", "pii-detections"] as const,
   dashboardMetrics: ["admin", "dashboard", "metrics"] as const,
+  reportSummary: (params: ReportQuery) =>
+    ["admin", "reports", "summary", params] as const,
   threats: (limit: number) => ["admin", "dashboard", "threats", limit] as const,
   users: ["admin", "users"] as const,
   llmConfigs: ["admin", "llm-configs"] as const,
@@ -66,6 +69,7 @@ export function useAudit(limit = 50) {
   return useQuery({
     queryKey: queryKeys.audit(limit),
     queryFn: ({ signal }) => adminApi.audit({ limit }, signal),
+    refetchInterval: 30_000,
   });
 }
 
@@ -103,6 +107,15 @@ export function useDashboardMetrics() {
     queryKey: queryKeys.dashboardMetrics,
     queryFn: ({ signal }) => adminApi.dashboardMetrics(signal),
     refetchInterval: 30_000,
+  });
+}
+
+export function useReportSummary(params: ReportQuery) {
+  return useQuery({
+    queryKey: queryKeys.reportSummary(params),
+    queryFn: ({ signal }) => adminApi.reportSummary(params, signal),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 }
 

@@ -13,6 +13,8 @@ import type {
   OrgTokenRotateResponse,
   PiiDetectionPolicy,
   PolicyResponse,
+  ReportQuery,
+  ReportSummaryResponse,
   TenantDetailResponse,
   TenantListItem,
   ThreatEventResponse,
@@ -128,6 +130,17 @@ export const adminApi = {
     }),
   dashboardMetrics: (signal?: AbortSignal) =>
     request<DashboardMetricsResponse>("/admin/v1/dashboard/metrics", { signal }),
+  reportSummary: (params: ReportQuery = {}, signal?: AbortSignal) =>
+    request<ReportSummaryResponse>("/admin/v1/reports/summary", {
+      query: {
+        days: params.days,
+        event_type: params.event_type,
+        provider: params.provider,
+        device: params.device,
+        entity: params.entity,
+      },
+      signal,
+    }),
   dashboardThreats: (limit = 50, signal?: AbortSignal) =>
     request<ThreatEventResponse[]>("/admin/v1/dashboard/threats", {
       query: { limit },

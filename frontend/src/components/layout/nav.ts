@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  BarChart3,
   Building2,
   Download,
   FileClock,
@@ -33,6 +34,12 @@ export const adminNav: NavSection[] = [
         to: "/threats",
         icon: ShieldAlert,
         permission: "threats:read",
+      },
+      {
+        label: "Reports",
+        to: "/reports",
+        icon: BarChart3,
+        permission: "dashboard:read",
       },
     ],
   },

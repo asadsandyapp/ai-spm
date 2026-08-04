@@ -39,7 +39,7 @@ export function MainLayout({ scope }: MainLayoutProps) {
         accountSub={accountSub}
       />
       <main className="scroll-thin flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-7xl px-6 py-8 lg:px-8">
+        <div className="mx-auto max-w-[90rem] px-6 py-8 lg:px-8">
           <Outlet />
         </div>
       </main>

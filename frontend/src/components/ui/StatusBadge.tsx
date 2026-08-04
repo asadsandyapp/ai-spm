@@ -30,12 +30,21 @@ function toneFor(status: string): Tone {
     case "revoked":
     case "blocked":
     case "deleted":
+    case "threat_detected":
+    case "prompt_blocked":
+    case "high":
       return "danger";
     case "pending":
     case "trialing":
     case "past_due":
     case "masked":
+    case "pii_detected":
+    case "policy_violation":
+    case "medium":
       return "warning";
+    case "prompt_submitted":
+    case "low":
+      return "info";
     default:
       return "neutral";
   }

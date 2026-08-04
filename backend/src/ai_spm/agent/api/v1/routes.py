@@ -22,6 +22,7 @@ from ai_spm.infrastructure.db.session import get_session
 from ai_spm.services.cert_service import CertService
 from ai_spm.services.policy_engine import PolicyEngine
 from ai_spm.services.prompt_pipeline import AgentService, PromptPipelineError, PromptPipelineService
+from ai_spm.services.severity import attach_severity
 from ai_spm.services.web_audit_text import humanize_prompt_text
 from ai_spm.tenant.context import require_tenant_context
 from ai_spm.tenant.quota import QuotaExceededError, increment_prompt_usage
@@ -191,15 +192,18 @@ async def web_audit(
         agent_id=ctx.agent_id,
         masked_content=masked[:2000],
         policy_action=PolicyAction.ALERT if hit_count > 0 else PolicyAction.ALLOW,
-        metadata_={
-            "provider": body.provider,
-            "model": body.model,
-            "pii_entities": entities,
-            "pii_hit_count": hit_count,
-            "source": body.source,
-            "inspect_only": True,
-            "original_content": (original[:2000] if original else None),
-        },
+        metadata_=attach_severity(
+            {
+                "provider": body.provider,
+                "model": body.model,
+                "pii_entities": entities,
+                "pii_hit_count": hit_count,
+                "source": body.source,
+                "inspect_only": True,
+                "original_content": (original[:2000] if original else None),
+            },
+            event_type,
+        ),
     )
     session.add(event)
     await session.commit()

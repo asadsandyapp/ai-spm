@@ -18,14 +18,16 @@ down:
 logs:
 	$(COMPOSE) logs -f api
 
+# Prefer Docker API container (matches Compose DB). Host venv is a fallback.
 migrate:
-	cd backend && alembic upgrade head
+	@$(COMPOSE) exec -T api alembic upgrade head || (cd backend && . .venv/bin/activate && alembic upgrade head)
 
 seed:
-	cd backend && . .venv/bin/activate && python scripts/seed_platform_admin.py && python scripts/seed_dev_tenant.py
+	@$(COMPOSE) exec -T api python scripts/seed_platform_admin.py
+	@$(COMPOSE) exec -T api python scripts/seed_dev_tenant.py
 
 seed-dev:
-	cd backend && . .venv/bin/activate && python scripts/seed_dev_tenant.py
+	@$(COMPOSE) exec -T api python scripts/seed_dev_tenant.py
 
 test-security:
 	cd backend && . .venv/bin/activate && pytest tests/security/ -v

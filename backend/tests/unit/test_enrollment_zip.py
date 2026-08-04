@@ -19,11 +19,6 @@ def test_build_linux_installer_is_sealed_sfx(tmp_path: Path, monkeypatch):
         "#!/bin/bash\necho launcher\n", encoding="utf-8"
     )
     (asset / "aispm-agent-installer").chmod(0o755)
-    (asset / "reconcile-browser-extensions.sh").write_text("#!/bin/bash\n", encoding="utf-8")
-    ext = asset / "browser-extension"
-    ext.mkdir()
-    (ext / "manifest.json").write_text('{"version":"1.0.0","name":"t"}\n', encoding="utf-8")
-    (ext / "background.js").write_text("// bg\n", encoding="utf-8")
     mitm = asset / "mitmproxy"
     mitm.mkdir()
     (mitm / "web_ui_mitm.py").write_text("# addon\n", encoding="utf-8")
@@ -59,8 +54,6 @@ def test_build_linux_installer_is_sealed_sfx(tmp_path: Path, monkeypatch):
         assert "enrollment.env" in names
         assert "install-agent.sh" in names
         assert "aispm-agent-installer" in names
-        assert "browser-extension/manifest.json" in names
-        assert "browser-extension/background.js" in names
         assert "mitmproxy/web_ui_mitm.py" in names
         assert "mitmproxy/pii_rules.py" in names
         assert "mitmproxy/start-web-mitm.sh" in names

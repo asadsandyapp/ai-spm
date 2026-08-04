@@ -110,9 +110,9 @@ async fn run_agent() -> Result<(), ServiceError> {
         });
     }
 
-    // MITM CA is only required for transparent / explicit proxy. Local-api (extension)
-    // must still start if CA files are unreadable — otherwise the service crash-loops
-    // and ChatGPT/Claude/Gemini masking dies with it.
+    // MITM CA is only required for transparent / explicit proxy. Local API
+    // (web-audit bridge for mitmproxy) must still start if CA files are unreadable —
+    // otherwise the service crash-loops and ChatGPT/Claude/Gemini masking dies with it.
     let need_mitm = config.transparent_enabled || config.explicit_proxy_enabled;
     let proxy_state = if need_mitm {
         match build_proxy_state(
@@ -187,13 +187,12 @@ async fn run_agent() -> Result<(), ServiceError> {
         }
     }
 
-    // Localhost bridge for web-MITM audit (+ legacy extension inspect). Always on
-    // when transparent MITM is enabled so ChatGPT web masks appear in Admin Audit.
+    // Localhost bridge for web-MITM audit. Always on when transparent MITM is
+    // enabled so ChatGPT/Claude/Gemini web masks appear in Admin Audit.
     let start_local_api = config.local_api_enabled || config.transparent_enabled;
     if start_local_api {
         info!(
             listen = %config.local_api_listen,
-            legacy = config.local_api_enabled,
             "starting local API (web-audit bridge on 127.0.0.1)"
         );
         let local_api_gateway = Arc::clone(&gateway);

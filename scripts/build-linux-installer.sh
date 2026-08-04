@@ -26,10 +26,6 @@ install -m 0755 "${GUI_SRC}/aispm-agent-installer-gui.py" "${OUT}/aispm-agent-in
 
 # Privileged engine
 install -m 0755 "${ROOT}/scripts/install-agent.sh" "${OUT}/install-agent.sh"
-if [[ -f "${ROOT}/scripts/reconcile-browser-extensions.sh" ]]; then
-  install -m 0755 "${ROOT}/scripts/reconcile-browser-extensions.sh" \
-    "${OUT}/reconcile-browser-extensions.sh"
-fi
 
 # SPM-style mitmproxy addon for ChatGPT/Claude/Gemini web UIs (required).
 if [[ ! -f "${ROOT}/scripts/mitmproxy/web_ui_mitm.py" || ! -f "${ROOT}/scripts/mitmproxy/start-web-mitm.sh" || ! -f "${ROOT}/scripts/mitmproxy/pii_rules.py" ]]; then
@@ -41,37 +37,6 @@ mkdir -p "${OUT}/mitmproxy"
 install -m 0644 "${ROOT}/scripts/mitmproxy/web_ui_mitm.py" "${OUT}/mitmproxy/web_ui_mitm.py"
 install -m 0644 "${ROOT}/scripts/mitmproxy/pii_rules.py" "${OUT}/mitmproxy/pii_rules.py"
 install -m 0755 "${ROOT}/scripts/mitmproxy/start-web-mitm.sh" "${OUT}/mitmproxy/start-web-mitm.sh"
-
-# Managed browser extension (legacy / optional — not installed by default).
-# Sealed Admin download may still embed sources for cleanup tools.
-EXT_SRC="${ROOT}/browser-extension"
-if [[ -d "${EXT_SRC}" && -f "${EXT_SRC}/manifest.json" ]]; then
-  echo "→ Staging browser-extension for managed install…"
-  rm -rf "${OUT}/browser-extension"
-  mkdir -p "${OUT}/browser-extension"
-  install -m 0644 "${EXT_SRC}/manifest.json" "${OUT}/browser-extension/manifest.json"
-  for f in "${EXT_SRC}"/*.js; do
-    [[ -f "${f}" ]] || continue
-    install -m 0644 "${f}" "${OUT}/browser-extension/$(basename "${f}")"
-  done
-  if [[ -f "${EXT_SRC}/ai-spm-prompt-guard-signed.xpi" ]]; then
-    install -m 0644 "${EXT_SRC}/ai-spm-prompt-guard-signed.xpi" \
-      "${OUT}/browser-extension/ai-spm-prompt-guard-signed.xpi"
-  elif [[ -f "${ROOT}/dist/ai-spm-prompt-guard-signed.xpi" ]]; then
-    install -m 0644 "${ROOT}/dist/ai-spm-prompt-guard-signed.xpi" \
-      "${OUT}/browser-extension/ai-spm-prompt-guard-signed.xpi"
-  fi
-else
-  echo "WARNING: browser-extension/ missing — sealed install will fail extension deploy." >&2
-fi
-
-# One vendor RSA key → stable Chromium extension ID on every endpoint (AGENTS.md).
-KEY="${OUT}/extension-key.pem"
-if [[ ! -f "${KEY}" ]]; then
-  echo "→ Generating stable Chromium extension signing key…"
-  openssl genrsa -out "${KEY}" 2048 2>/dev/null
-  chmod 600 "${KEY}"
-fi
 
 # Prefer release agent-service; build if missing
 BIN_SRC="${AGENT_DIR}/target/release/agent-service"

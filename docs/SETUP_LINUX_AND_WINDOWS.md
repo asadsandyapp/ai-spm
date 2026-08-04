@@ -595,7 +595,7 @@ make test-security
 | **6380** | Redis (host) | Maps to container 6379 |
 | 9443 | Agent transparent MITM | Linux enterprise |
 | 8800 | Web UI mitmproxy | ChatGPT / Claude / Gemini |
-| 8092 | Agent local API | Legacy extension bridge (off by default) |
+| 8092 | Agent local API | mitmproxy web-audit bridge (`POST /web-audit`) |
 
 ---
 

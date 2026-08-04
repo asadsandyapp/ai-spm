@@ -11,6 +11,7 @@ import { PlatformLoginPage } from "@/pages/platform/PlatformLoginPage";
 import { TenantsPage } from "@/pages/platform/TenantsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { ThreatsPage } from "@/pages/ThreatsPage";
+import { ReportsPage } from "@/pages/ReportsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export function App() {
@@ -31,6 +32,7 @@ export function App() {
         >
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/threats" element={<ThreatsPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/download" element={<DownloadAgentPage />} />
           <Route path="/policies" element={<PoliciesPage />} />

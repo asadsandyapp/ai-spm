@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-SPM Feature-Wise Sprint Backlog</title>
+<style>
+  @page { size: A4 landscape; margin: 11mm 10mm 14mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #172033;
+    background: #fff;
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 8.5pt;
+    line-height: 1.35;
+  }
+  .document-title {
+    border-bottom: 3px solid #6d5dfc;
+    margin-bottom: 7mm;
+    padding: 0 0 4mm;
+  }
+  .document-title h1 { color: #172033; font-size: 23pt; margin: 0 0 1mm; }
+  .document-title p { color: #657089; font-size: 9.5pt; margin: 0; }
+  section { page-break-before: always; }
+  section.sprint-1 { page-break-before: auto; }
+  .sprint-heading {
+    align-items: center;
+    display: -webkit-box;
+    display: flex;
+    margin-bottom: 2mm;
+  }
+  .sprint-number {
+    background: #6d5dfc;
+    border-radius: 5px;
+    color: #fff;
+    display: inline-block;
+    font-size: 15pt;
+    font-weight: 700;
+    margin-right: 3mm;
+    padding: 2mm 3mm;
+  }
+  h2 { color: #172033; font-size: 16pt; margin: 0; }
+  .metadata { color: #657089; margin: 0 0 4mm 14mm; }
+  .label {
+    background: #eeeafd;
+    border: 1px solid #d8d1fc;
+    border-radius: 7px;
+    color: #5141cf;
+    font-size: 7.5pt;
+    font-weight: 700;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: 100%;
+  }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th {
+    background: #292d45;
+    color: #fff;
+    font-size: 7.8pt;
+    letter-spacing: .2px;
+    padding: 2.3mm 2mm;
+    text-align: left;
+    text-transform: uppercase;
+  }
+  th:first-child { border-radius: 5px 0 0 0; }
+  th:last-child { border-radius: 0 5px 0 0; }
+  td {
+    border-bottom: 1px solid #dfe3ec;
+    border-right: 1px solid #e8ebf2;
+    padding: 2.1mm 2mm;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+  td:first-child { border-left: 1px solid #e8ebf2; }
+  tbody tr:nth-child(even) td { background: #f7f8fc; }
+
+  table.tasks th:first-child { text-align: center; }
+  table.tasks td:first-child {
+    color: #68728a;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+  }
+  table.tasks td:nth-child(2) {
+    color: #5646d8;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  table.tasks td:nth-child(3) { color: #172033; font-weight: 700; }
+  table.tasks td:last-child { color: #5d6780; font-size: 8pt; }
+
+  table.tasks.simple { font-size: 9pt; }
+  table.tasks.simple td:nth-child(2) {
+    color: #172033;
+    font-weight: 700;
+    white-space: normal;
+  }
+  table.tasks.simple td:last-child { color: #4a5468; font-size: 8.6pt; }
+
+  table.coverage { font-size: 8.2pt; }
+  table.coverage th:first-child { text-align: left; }
+  table.coverage td {
+    color: #172033;
+    font-weight: 400;
+    line-height: 1.4;
+  }
+  table.coverage td:first-child {
+    color: #172033;
+    font-weight: 700;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .outcome {
+    background: #eef9f4;
+    border-left: 4px solid #21a675;
+    border-radius: 4px;
+    color: #1f5f49;
+    margin-top: 4mm;
+    padding: 3mm 4mm;
+  }
+  .appendix { page-break-before: always; }
+  .appendix h2 {
+    border-bottom: 2px solid #6d5dfc;
+    margin-bottom: 5mm;
+    padding-bottom: 2mm;
+  }
+  pre {
+    background: #172033;
+    border-radius: 6px;
+    color: #e9edff;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 8pt;
+    line-height: 1.65;
+    padding: 6mm;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<header class="document-title"><h1>AI-SPM — Feature-Wise Sprint</h1><p>Four-sprint delivery plan · Feature-wise implementation backlog</p></header>
+<section class="sprint sprint-1"><div class="sprint-heading"><span class="sprint-number">01</span><h2>Sprint 1 — Company Onboarding &amp; First Connected Device</h2></div>
+<div class="metadata"><strong>1 Aug – 14 Aug</strong> · Labels: <span class=\"label\">SAAS</span>, <span class=\"label\">ONBOARDING</span>, <span class=\"label\">SUPER ADMIN</span>, <span class=\"label\">ENDPOINT AGENT</span></div>
+<table class="tasks"><colgroup><col style="width:3%"><col style="width:11%"><col style="width:26%"><col style="width:48%"><col style="width:12%"></colgroup><thead><tr><th>#</th><th>Key</th><th>Jira title</th><th>Description</th><th>Needs first</th></tr></thead><tbody><tr><td>1</td><td>SPM-3</td><td>Security service foundation (company data model, health checks)</td><td>Set up the central service that stores companies, users, devices and activity, with health checks so the team can confirm it is running.</td><td>—</td></tr><tr><td>2</td><td>SPM-SaaS-2</td><td>Create company workspace, first admin user and install token</td><td>When a company joins, automatically create its private workspace, its first admin account and the install token used to connect devices.</td><td>SPM-3</td></tr><tr><td>3</td><td>SPM-6</td><td>Company admin login and secure session</td><td>A company admin can sign in with email and password, stay signed in securely, and sign out.</td><td>SPM-SaaS-2</td></tr><tr><td>4</td><td>SPM-SaaS-7</td><td>Company self-registration page (company name, admin email, password)</td><td>A new customer registers without contacting sales by entering their company name, admin email and password.</td><td>SPM-6</td></tr><tr><td>5</td><td>SPM-SaaS-8</td><td>Email verification and first-login welcome onboarding</td><td>The admin confirms their email address, then sees a short welcome guide explaining the first steps to protect their company.</td><td>SPM-SaaS-7</td></tr><tr><td>6</td><td>SPM-5</td><td>Public entry point with safe routing and request limits</td><td>Put all customer traffic behind a single protected entry point that limits abusive request volumes.</td><td>SPM-3</td></tr><tr><td>7</td><td>SPM-SaaS-3</td><td>Super Admin: list, suspend and reactivate customer companies</td><td>The Super Admin sees every customer company and can suspend or reactivate an account, for example for non-payment.</td><td>SPM-SaaS-2</td></tr><tr><td>8</td><td>SPM-19a</td><td>Company&#x27;s first AI protection policy (allow / mask / block)</td><td>The company admin chooses what happens when sensitive information is found in an AI prompt: allow it, mask it or block it.</td><td>SPM-6</td></tr><tr><td>9</td><td>SPM-AGT-1</td><td>Agent application skeleton that runs on a Linux machine</td><td>Build the endpoint application that runs on an employee computer, reads its configuration and stays running in the background.</td><td>—</td></tr><tr><td>10</td><td>SPM-AGT-2</td><td>Device enrolment service: a device joins a company using its install token</td><td>The service accepts a device&#x27;s install token, confirms which company it belongs to and issues its identity.</td><td>SPM-SaaS-2</td></tr><tr><td>11</td><td>SPM-AGT-3</td><td>Agent registers itself with the company install token</td><td>On first start the agent enrols itself with the company install token so it appears in that company&#x27;s device list.</td><td>SPM-AGT-2</td></tr><tr><td>12</td><td>SPM-AGT-4</td><td>Agent reports it is alive so the company sees Online / Offline</td><td>The agent checks in regularly, and a device that stops checking in is shown as Offline in the console.</td><td>SPM-AGT-3</td></tr><tr><td>13</td><td>SPM-AGT-5</td><td>Agent sends a captured AI prompt for inspection and applies the decision</td><td>The agent sends an AI prompt for inspection and then allows, masks or blocks it according to the company policy.</td><td>SPM-19a</td></tr><tr><td>14</td><td>SPM-SaaS-4</td><td>A registered company connects its first device end to end</td><td>Full journey check: a company registers, installs the agent on one machine and sees that device appear as Online.</td><td>SPM-AGT-4</td></tr><tr><td>15</td><td>SPM-16a</td><td>First protected AI activity appears in the company audit log</td><td>After an employee sends an AI prompt, the company admin sees a record of it with sensitive values hidden.</td><td>SPM-AGT-5</td></tr></tbody></table>
+<div class="outcome"><strong>Sprint outcome:</strong> A company signs up, verifies its email, logs in, sets one policy, installs the agent on one Linux machine, sees that device as Online, and sees its first inspected AI prompt.</div>
+</section>
+<section class="sprint sprint-2"><div class="sprint-heading"><span class="sprint-number">02</span><h2>Sprint 2 — Sensitive Data Protection &amp; Full Linux Coverage</h2></div>
+<div class="metadata"><strong>15 Aug – 28 Aug</strong> · Labels: <span class=\"label\">DATA MASKING</span>, <span class=\"label\">ENDPOINT AGENT</span>, <span class=\"label\">SAAS</span></div>
+<table class="tasks"><colgroup><col style="width:3%"><col style="width:11%"><col style="width:26%"><col style="width:48%"><col style="width:12%"></colgroup><thead><tr><th>#</th><th>Key</th><th>Jira title</th><th>Description</th><th>Needs first</th></tr></thead><tbody><tr><td>1</td><td>SPM-13</td><td>Detect common sensitive data (emails, names, cards, passwords, addresses)</td><td>Recognise everyday personal and company information inside AI prompts so it can be protected.</td><td>SPM-16a</td></tr><tr><td>2</td><td>SPM-14</td><td>Detect IDs (CNIC, SSN, IBAN, phone, passport)</td><td>Recognise national and financial identity numbers used by customers in different countries.</td><td>SPM-13</td></tr><tr><td>3</td><td>SPM-16b</td><td>Mask sensitive data in AI requests and responses, store masked records only</td><td>Replace sensitive values before the prompt reaches the AI provider, and keep only the masked version in company records.</td><td>SPM-14</td></tr><tr><td>4</td><td>SPM-MASK-1</td><td>Company admin chooses which sensitive data types to protect</td><td>The admin turns individual data categories on or off to match the company&#x27;s own privacy rules.</td><td>SPM-16b</td></tr><tr><td>5</td><td>SPM-SaaS-9</td><td>Subscription plans page (Free / Pro / Enterprise)</td><td>Show the available plans with what each one includes so a customer can pick the right one.</td><td>SPM-SaaS-7</td></tr><tr><td>6</td><td>SPM-SaaS-10</td><td>Apply plan limits (maximum devices, monthly prompt quota)</td><td>Enforce the device count and monthly usage allowed by the company&#x27;s plan.</td><td>SPM-SaaS-9</td></tr><tr><td>7</td><td>SPM-AGT-L0</td><td>Install the company security certificate so traffic can be inspected safely</td><td>Install and trust the security certificate on the employee machine so protected traffic can be checked without breaking the browser.</td><td>SPM-AGT-3</td></tr><tr><td>8</td><td>SPM-AGT-L1</td><td>Linux: protect AI apps, developer tools and API traffic</td><td>Protect AI usage coming from installed applications, developer tools and scripts on Linux machines.</td><td>SPM-AGT-L0</td></tr><tr><td>9</td><td>SPM-AGT-L2</td><td>Linux: protect ChatGPT / Claude / Gemini websites</td><td>Protect what employees type into the ChatGPT, Claude and Gemini websites in their browser.</td><td>SPM-AGT-L1</td></tr><tr><td>10</td><td>SPM-AGT-L5</td><td>Send protected AI website activity to the company console</td><td>Website AI activity is reported to the company console so admins see it alongside application activity.</td><td>SPM-AGT-L2</td></tr><tr><td>11</td><td>SPM-AGT-L3</td><td>Linux: one-command install that starts protection automatically</td><td>IT installs the agent with a single command, and protection starts automatically and restarts with the machine.</td><td>SPM-AGT-L2</td></tr><tr><td>12</td><td>SPM-AGT-L4</td><td>Linux: reinstall without duplicate devices or wasted licences</td><td>Reinstalling on the same machine updates the existing device instead of creating a duplicate and consuming another licence.</td><td>SPM-AGT-L3</td></tr><tr><td>13</td><td>SPM-INT-2</td><td>Sensitive data typed into ChatGPT on Linux is masked before it leaves the machine</td><td>End-to-end check that real sensitive information typed into an AI website never reaches the provider.</td><td>SPM-16b, SPM-AGT-L2</td></tr><tr><td>14</td><td>SPM-INT-3</td><td>A company that reaches its device limit cannot enrol more machines</td><td>End-to-end check that plan limits are enforced when IT tries to install beyond the purchased device count.</td><td>SPM-SaaS-10, SPM-AGT-L4</td></tr></tbody></table>
+<div class="outcome"><strong>Sprint outcome:</strong> A company decides what sensitive data to protect, installs the agent on Linux machines with one command, and employee AI website and AI application activity is masked.</div>
+</section>
+<section class="sprint sprint-3"><div class="sprint-heading"><span class="sprint-number">03</span><h2>Sprint 3 — Company Console &amp; Deployment Experience</h2></div>
+<div class="metadata"><strong>29 Aug – 11 Sep</strong> · Labels: <span class=\"label\">ADMIN DASHBOARD</span>, <span class=\"label\">AGENT UX</span>, <span class=\"label\">SAAS</span>, <span class=\"label\">SUPER ADMIN</span></div>
+<table class="tasks"><colgroup><col style="width:3%"><col style="width:11%"><col style="width:26%"><col style="width:48%"><col style="width:12%"></colgroup><thead><tr><th>#</th><th>Key</th><th>Jira title</th><th>Description</th><th>Needs first</th></tr></thead><tbody><tr><td>1</td><td>SPM-21</td><td>Company security overview (protected prompts, masked data, blocked activity)</td><td>A dashboard showing how much AI activity was protected, what was masked, what was blocked and how this changes over time.</td><td>SPM-16b</td></tr><tr><td>2</td><td>SPM-DASH-1</td><td>Company device fleet: Online / Offline / revoke access</td><td>List every company device with its status, and let the admin revoke a machine that should no longer be protected or trusted.</td><td>SPM-AGT-4</td></tr><tr><td>3</td><td>SPM-SaaS-5</td><td>Company install credentials: view, copy and rotate</td><td>The admin views and copies the install token for new devices, and rotates it if it may have been shared or leaked.</td><td>SPM-SaaS-2</td></tr><tr><td>4</td><td>SPM-SaaS-11</td><td>Company settings (profile, preferences, protection configuration)</td><td>One place for the admin to manage company details, preferences and protection configuration.</td><td>SPM-MASK-1</td></tr><tr><td>5</td><td>SPM-SaaS-12</td><td>Company plan and usage page (plan, quota used, quota remaining)</td><td>The admin sees the current plan, how many devices and prompts have been used, and how much allowance is left.</td><td>SPM-SaaS-10</td></tr><tr><td>6</td><td>SPM-SaaS-13</td><td>Super Admin customer overview (companies, plans, usage, status, fleet size)</td><td>The Super Admin reviews all customers in one view with their plan, usage, account status and number of protected devices.</td><td>SPM-SaaS-3, SPM-SaaS-12</td></tr><tr><td>7</td><td>SPM-UX-3</td><td>Every install binds to its company so activity is attributed correctly</td><td>A device installed from a company&#x27;s package reports only into that company, so activity is never attributed to the wrong customer.</td><td>SPM-SaaS-5</td></tr><tr><td>8</td><td>SPM-UX-2</td><td>Download agent page with a company-specific Linux package and steps</td><td>The admin downloads an installer already tied to their company, with clear installation instructions.</td><td>SPM-UX-3</td></tr><tr><td>9</td><td>SPM-UX-1</td><td>Guided deploy wizard: choose the operating system, install, confirm Online</td><td>A step-by-step wizard walks the admin through choosing an operating system, installing the agent and confirming the device is protected.</td><td>SPM-UX-2, SPM-DASH-1</td></tr><tr><td>10</td><td>SPM-UX-4</td><td>Device status for employees: Active / Disconnected / Blocked</td><td>Employees can see on their own machine whether protection is Active, Disconnected or Blocked.</td><td>SPM-AGT-4</td></tr></tbody></table>
+<div class="outcome"><strong>Sprint outcome:</strong> Company admins and Super Admin run the service day to day — monitor security, manage devices, deploy agents and track plan usage — without developer assistance.</div>
+</section>
+<section class="sprint sprint-4"><div class="sprint-heading"><span class="sprint-number">04</span><h2>Sprint 4 — Windows Protection, Threat Defence &amp; Paid Plans</h2></div>
+<div class="metadata"><strong>12 Sep – 25 Sep</strong> · Labels: <span class=\"label\">WINDOWS</span>, <span class=\"label\">THREAT SHIELDING</span>, <span class=\"label\">SAAS</span>, <span class=\"label\">BILLING</span></div>
+<table class="tasks"><colgroup><col style="width:3%"><col style="width:11%"><col style="width:26%"><col style="width:48%"><col style="width:12%"></colgroup><thead><tr><th>#</th><th>Key</th><th>Jira title</th><th>Description</th><th>Needs first</th></tr></thead><tbody><tr><td>1</td><td>SPM-SaaS-16</td><td>Password reset and account recovery</td><td>An admin who forgets their password can securely regain access without contacting support.</td><td>SPM-6</td></tr><tr><td>2</td><td>SPM-THR-1</td><td>Detect dangerous AI prompts (jailbreak, prompt injection, policy violations)</td><td>Identify prompts that try to bypass AI safety controls or break company rules, and act on them.</td><td>SPM-16b</td></tr><tr><td>3</td><td>SPM-SaaS-14</td><td>Buy a paid plan: checkout</td><td>A customer upgrades from the plans page, pays, and their new plan limits apply automatically.</td><td>SPM-SaaS-10</td></tr><tr><td>4</td><td>SPM-SaaS-17</td><td>Super Admin billing view (paid plans, failed payments, plan status)</td><td>The Super Admin reviews paid subscriptions, plan status and failed payments across all customers.</td><td>SPM-SaaS-14</td></tr><tr><td>5</td><td>SPM-SaaS-15</td><td>Contact sales / Enterprise request form</td><td>A larger prospect submits their requirements so the sales team can follow up.</td><td>SPM-SaaS-9</td></tr><tr><td>6</td><td>SPM-WIN-1</td><td>Windows: always-on protection that starts with the computer</td><td>The agent runs on Windows automatically from start-up and keeps running in the background without user action.</td><td>SPM-AGT-L1</td></tr><tr><td>7</td><td>SPM-WIN-3</td><td>Windows: security certificate trust and AI application traffic protection</td><td>Trust the security certificate on Windows and protect AI usage from installed applications and developer tools.</td><td>SPM-WIN-1</td></tr><tr><td>8</td><td>SPM-WIN-4</td><td>Windows: protect ChatGPT / Claude / Gemini websites</td><td>Protect what employees type into AI websites from Windows browsers.</td><td>SPM-WIN-3</td></tr><tr><td>9</td><td>SPM-WIN-2</td><td>Windows: silent enterprise rollout via MSI, Group Policy or Intune</td><td>IT deploys the agent to many Windows machines at once, with no prompts for the employee.</td><td>SPM-WIN-4</td></tr><tr><td>10</td><td>SPM-WIN-5</td><td>Windows: signed installer and tray app showing protection status</td><td>Ship a trusted signed installer and a small status indicator so employees can confirm protection is active.</td><td>SPM-WIN-2</td></tr><tr><td>11</td><td>SPM-DASH-2</td><td>Single console view across Linux and Windows devices</td><td>The admin manages and monitors Linux and Windows machines together in one console.</td><td>SPM-WIN-1</td></tr></tbody></table>
+<div class="outcome"><strong>Sprint outcome:</strong> The product serves Linux and Windows customers, blocks malicious AI prompts, and sells itself through self-service paid plans and enterprise enquiries.</div>
+</section>
+<section class="appendix"><h2>Dependency Map Across Sprints</h2>
+<pre>Sprint 1  Company workspace + install token ──► Agent enrolment ──► Device Online ──► First audit record
+             │                                                                             │
+Sprint 2     └► Sensitive data rules ──────────► Agent masks Linux traffic ─────────────────┘
+                                                        │
+Sprint 3  Dashboards + fleet + install credential ──────┴► Download package ──► Deploy wizard
+                                                                                    │
+Sprint 4  Paid plans + threat detection ──────────────► Windows agent ──────────────┴► One console</pre>
+<section class="appendix"><h2>Feature Coverage Summary</h2>
+<table class="coverage"><colgroup><col style="width:16%"><col style="width:21%"><col style="width:21%"><col style="width:21%"><col style="width:21%"></colgroup><thead><tr><th>Area</th><th>Sprint 1</th><th>Sprint 2</th><th>Sprint 3</th><th>Sprint 4</th></tr></thead><tbody><tr><td>Super Admin</td><td>List, suspend, activate companies</td><td>—</td><td>Customer overview and usage</td><td>Billing and subscription view</td></tr><tr><td>Company admin</td><td>Signup, login, first policy, first audit record</td><td>Choose protected data types, view plans</td><td>Dashboard, fleet, settings, usage, deploy wizard</td><td>Password recovery, cross-platform console</td></tr><tr><td>SaaS platform</td><td>Data isolation, company workspace</td><td>Plans and limits</td><td>Install credentials, usage tracking</td><td>Checkout, subscriptions, enterprise enquiries</td></tr><tr><td>Linux agent</td><td>Skeleton, enrolment, heartbeat, first inspection</td><td>Certificate trust, API and website protection, install, reinstall</td><td>Company-bound package, status indicator</td><td>Shared engine reused by Windows</td></tr><tr><td>Windows agent</td><td>—</td><td>—</td><td>—</td><td>Service, interception, websites, MSI, signed installer</td></tr><tr><td>Security engine</td><td>First inspection and audit entry</td><td>Sensitive data detection and masking</td><td>Security metrics</td><td>Threat detection</td></tr></tbody></table>
+</section>
+</body>
+</html>

@@ -18,6 +18,7 @@ from ai_spm.infrastructure.llm.openai_adapter import LLMProviderError, OpenAIAda
 from ai_spm.infrastructure.metrics import prompt_pipeline_duration, prompts_blocked_total, prompts_total
 from ai_spm.infrastructure.presidio.adapter import PresidioAdapter
 from ai_spm.services.policy_engine import PolicyEngine
+from ai_spm.services.severity import attach_severity
 from ai_spm.tenant.quota import increment_prompt_usage
 
 logger = structlog.get_logger(__name__)
@@ -116,6 +117,7 @@ class PromptPipelineService:
                 {
                     "reason": threat.reason,
                     "threat_type": threat.threat_type,
+                    "threat_severity": threat.severity,
                     "provider": provider,
                     "model": model,
                 },
@@ -225,7 +227,12 @@ class PromptPipelineService:
                 session, org_id, agent_id,
                 AuditEventType.THREAT_DETECTED, masked_combined[:2000],
                 PolicyAction.BLOCK,
-                {"reason": outbound_threat.reason, "phase": "response"},
+                {
+                    "reason": outbound_threat.reason,
+                    "threat_type": outbound_threat.threat_type,
+                    "threat_severity": outbound_threat.severity,
+                    "phase": "response",
+                },
             )
             return {
                 "decision": PromptDecision.BLOCKED.value,
@@ -286,7 +293,7 @@ class PromptPipelineService:
             agent_id=agent_id,
             masked_content=masked_content,
             policy_action=policy_action,
-            metadata_=metadata,
+            metadata_=attach_severity(metadata, event_type),
         )
         session.add(event)
         await session.commit()

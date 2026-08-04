@@ -211,6 +211,60 @@ class DashboardMetricsResponse(BaseModel):
     daily_activity: list[dict]
 
 
+class ReportNamedCount(BaseModel):
+    name: str
+    count: int
+
+
+class ReportDailyPoint(BaseModel):
+    date: str
+    total: int
+    prompts: int
+    blocks: int
+    pii: int
+    threats: int
+    policy_violations: int
+
+
+class ReportFilterOptions(BaseModel):
+    event_types: list[str] = Field(default_factory=list)
+    providers: list[str] = Field(default_factory=list)
+    devices: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+
+
+class ReportSummaryResponse(BaseModel):
+    days: int
+    period_start: str
+    period_end: str
+    total_events: int
+    prompts: int
+    blocks: int
+    pii_detections: int
+    threats: int
+    policy_violations: int
+    prompt_blocked: int
+    block_rate_pct: float
+    pii_rate_pct: float
+    security_score: int
+    agents_total: int
+    agents_online: int
+    agents_offline: int
+    agents_pending: int
+    agents_revoked: int
+    policies_active: int
+    avg_daily_events: float
+    peak_day: str | None = None
+    peak_day_count: int = 0
+    daily_activity: list[ReportDailyPoint]
+    by_event_type: list[ReportNamedCount]
+    by_provider: list[ReportNamedCount]
+    by_device: list[ReportNamedCount]
+    by_entity: list[ReportNamedCount]
+    by_source: list[ReportNamedCount]
+    filter_options: ReportFilterOptions
+
+
 class ThreatEventResponse(BaseModel):
     id: str
     event_type: str
@@ -218,6 +272,8 @@ class ThreatEventResponse(BaseModel):
     masked_content: str
     original_content: str | None = None
     metadata: dict
+    pii_entities: list[str] = Field(default_factory=list)
+    pii_hit_count: int = 0
     created_at: str
     agent_id: str | None = None
     hostname: str | None = None

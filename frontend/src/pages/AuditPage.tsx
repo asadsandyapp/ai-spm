@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { Download, FileClock, RefreshCw } from "lucide-react";
+import {
+  applyFeedFilters,
+  collectFeedFilterOptions,
+  EMPTY_FEED_FILTERS,
+  FeedFilters,
+  type FeedFilterState,
+} from "@/components/ui/FeedFilters";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { DetectedCell, PromptCell } from "@/components/ui/TableCells";
 import {
   EmptyState,
   ErrorState,
@@ -9,33 +17,35 @@ import {
 } from "@/components/ui/States";
 import { useAudit, useExportAudit } from "@/hooks/queries";
 import { ApiError } from "@/lib/api";
-import { cn, formatDateTime, providerLabel, titleCase } from "@/lib/utils";
+import { cn, formatDateTime, providerLabel } from "@/lib/utils";
 
 const LIMITS = [50, 100, 200];
 const EXPORT_DAYS = [30, 90, 180, 365];
 
 export function AuditPage() {
   const [limit, setLimit] = useState(50);
+  const [filters, setFilters] = useState<FeedFilterState>(EMPTY_FEED_FILTERS);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
   const { data, isLoading, isError, error, refetch, isFetching } =
     useAudit(limit);
   const exportM = useExportAudit();
-  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [exportDays, setExportDays] = useState(90);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  function toggleRowExpand(id: string) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   const events = data ?? [];
-
-  const eventTypes = useMemo(
-    () => Array.from(new Set(events.map((e) => e.event_type))).sort(),
-    [events],
-  );
-
+  const options = useMemo(() => collectFeedFilterOptions(events), [events]);
   const filtered = useMemo(
-    () =>
-      typeFilter === "all"
-        ? events
-        : events.filter((e) => e.event_type === typeFilter),
-    [events, typeFilter],
+    () => applyFeedFilters(events, filters),
+    [events, filters],
   );
 
   async function handleExport() {
@@ -55,25 +65,55 @@ export function AuditPage() {
     }
   }
 
+  const limitControl = (
+    <div className="inline-flex items-center gap-2 text-sm text-ink-500">
+      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-400">
+        Rows
+      </span>
+      <div className="inline-flex rounded-lg bg-white p-0.5 ring-1 ring-ink-200">
+        {LIMITS.map((l) => (
+          <button
+            key={l}
+            type="button"
+            onClick={() => setLimit(l)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-sm font-semibold tabular-nums transition-colors",
+              limit === l
+                ? "bg-ink-900 text-white"
+                : "text-ink-500 hover:text-ink-900",
+            )}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <PageHeader
         title="Audit Log"
-        description="User prompts from ChatGPT / Claude / Gemini. Original + masked columns for admin review; API JSON chunks are stripped."
+        description="Complete prompt history with original and masked content for compliance review across ChatGPT, Claude, and Gemini."
         actions={
-          <div className="flex items-center gap-2">
-            <select
-              className="input max-w-[120px] py-2"
-              value={exportDays}
-              onChange={(e) => setExportDays(Number(e.target.value))}
-              aria-label="Export window"
-            >
-              {EXPORT_DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {d} days
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-xl bg-white p-1 ring-1 ring-ink-200">
+              <label className="pl-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-400">
+                Export
+              </label>
+              <select
+                className="rounded-lg border-0 bg-transparent py-1.5 pr-8 text-sm font-medium text-ink-800 focus:outline-none focus:ring-0"
+                value={exportDays}
+                onChange={(e) => setExportDays(Number(e.target.value))}
+                aria-label="Export window"
+              >
+                {EXPORT_DAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {d} days
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               className="btn-primary"
               onClick={handleExport}
@@ -83,7 +123,7 @@ export function AuditPage() {
               {exportM.isPending ? "Exporting…" : "Export CSV"}
             </button>
             <button
-              className="btn-ghost"
+              className="btn-ghost ring-1 ring-ink-200"
               onClick={() => refetch()}
               disabled={isFetching}
             >
@@ -102,139 +142,121 @@ export function AuditPage() {
         </p>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          className="input max-w-[220px]"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-        >
-          <option value="all">All event types</option>
-          {eventTypes.map((t) => (
-            <option key={t} value={t}>
-              {titleCase(t)}
-            </option>
-          ))}
-        </select>
+      <FeedFilters
+        filters={filters}
+        onChange={setFilters}
+        options={options}
+        resultCount={filtered.length}
+        totalCount={events.length}
+        searchPlaceholder="Search audit by prompt text, device, or entity…"
+        limitControl={limitControl}
+      />
 
-        <div className="ml-auto inline-flex items-center gap-2 text-sm text-ink-500">
-          <span>Show</span>
-          <div className="inline-flex rounded-lg border border-ink-200 bg-white p-1">
-            {LIMITS.map((l) => (
-              <button
-                key={l}
-                onClick={() => setLimit(l)}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-sm font-medium transition-colors",
-                  limit === l
-                    ? "bg-ink-900 text-white"
-                    : "text-ink-500 hover:text-ink-900",
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="card overflow-hidden">
+      <div className="overflow-hidden rounded-2xl border border-ink-200/80 bg-white shadow-elevated">
         {isLoading ? (
           <Spinner label="Loading audit events…" />
         ) : isError ? (
           <ErrorState error={error} onRetry={() => refetch()} />
-        ) : filtered.length === 0 ? (
+        ) : events.length === 0 ? (
           <EmptyState
             icon={FileClock}
             title="No audit events"
             description="Audit events will appear here as agents submit prompts and policies are evaluated."
           />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={FileClock}
+            title="No matching audit events"
+            description="Try clearing filters or broadening your search."
+          />
         ) : (
-          <div className="scroll-thin overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-ink-200 bg-ink-50/60 text-xs uppercase tracking-wide text-ink-500">
-                  <th className="px-5 py-3 font-semibold">Event</th>
-                  <th className="px-5 py-3 font-semibold">Original prompt</th>
-                  <th className="px-5 py-3 font-semibold">Masked prompt</th>
-                  <th className="px-5 py-3 font-semibold">Detected</th>
-                  <th className="px-5 py-3 font-semibold">AI Agent</th>
-                  <th className="px-5 py-3 font-semibold">Device</th>
-                  <th className="px-5 py-3 font-semibold whitespace-nowrap">
-                    Timestamp
-                  </th>
+          <div className="w-full">
+            <table className="w-full table-fixed text-left text-sm">
+              <colgroup>
+                <col className="w-[10%]" />
+                <col className="w-[24%]" />
+                <col className="w-[24%]" />
+                <col className="w-[14%]" />
+                <col className="w-[8%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+              </colgroup>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-ink-200 bg-ink-50/95 text-[11px] uppercase tracking-[0.08em] text-ink-500 backdrop-blur">
+                  <th className="px-3 py-3.5 font-semibold">Event</th>
+                  <th className="px-3 py-3.5 font-semibold">Original</th>
+                  <th className="px-3 py-3.5 font-semibold">Masked</th>
+                  <th className="px-3 py-3.5 font-semibold">Detected</th>
+                  <th className="px-3 py-3.5 font-semibold">Agent</th>
+                  <th className="px-3 py-3.5 font-semibold">Device</th>
+                  <th className="px-3 py-3.5 font-semibold">Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {filtered.map((e) => (
-                  <tr key={e.id} className="transition-colors hover:bg-ink-50/60">
-                    <td className="px-5 py-3.5">
+                {filtered.map((e) => {
+                  const expanded = expandedRows.has(e.id);
+                  const onToggleExpand = () => toggleRowExpand(e.id);
+                  return (
+                  <tr
+                    key={e.id}
+                    className="align-top transition-colors hover:bg-brand-50/30"
+                  >
+                    <td className="px-3 py-3.5">
                       <StatusBadge status={e.event_type} />
                     </td>
-                    <td className="px-5 py-3.5 max-w-sm">
-                      <p className="whitespace-pre-wrap break-words text-ink-700">
-                        {e.original_content || (
-                          <span className="text-ink-400">—</span>
-                        )}
-                      </p>
+                    <td className="px-3 py-3.5">
+                      <PromptCell
+                        text={e.original_content}
+                        expanded={expanded}
+                        onToggleExpand={onToggleExpand}
+                      />
                     </td>
-                    <td className="px-5 py-3.5 max-w-sm">
-                      <p
-                        className="whitespace-pre-wrap break-words text-ink-700"
-                        title="Masked prompt as sent to the AI provider"
-                      >
-                        {e.masked_content || (
-                          <span className="text-ink-400">
-                            No content captured
-                          </span>
-                        )}
-                      </p>
+                    <td className="px-3 py-3.5">
+                      <PromptCell
+                        text={e.masked_content}
+                        empty="No content captured"
+                        expanded={expanded}
+                        onToggleExpand={onToggleExpand}
+                      />
                     </td>
-                    <td className="px-5 py-3.5 max-w-xs">
-                      {(e.pii_entities?.length ?? 0) > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {e.pii_entities.map((ent) => (
-                            <span
-                              key={ent}
-                              className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
-                            >
-                              {ent}
-                            </span>
-                          ))}
-                          {e.pii_hit_count > 0 && (
-                            <span className="text-xs text-ink-400">
-                              ×{e.pii_hit_count}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-ink-400">—</span>
-                      )}
+                    <td className="px-3 py-3.5">
+                      <DetectedCell
+                        entities={e.pii_entities}
+                        hitCount={e.pii_hit_count}
+                        expanded={expanded}
+                        onToggleExpand={onToggleExpand}
+                      />
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-3 py-3.5">
                       {providerLabel(e.provider) ? (
-                        <span className="text-ink-700">
+                        <span className="break-words text-[13px] font-medium text-ink-800">
                           {providerLabel(e.provider)}
                         </span>
                       ) : (
                         <span className="text-ink-400">—</span>
                       )}
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-3 py-3.5">
                       {e.hostname ? (
-                        <span className="text-ink-700">{e.hostname}</span>
+                        <span className="break-all text-[12px] text-ink-700">
+                          {e.hostname}
+                        </span>
                       ) : e.agent_id ? (
-                        <span className="font-mono text-xs text-ink-500">
-                          {e.agent_id.slice(0, 8)}
+                        <span className="break-all font-mono text-xs text-ink-500">
+                          {e.agent_id}
                         </span>
                       ) : (
                         <span className="text-ink-400">—</span>
                       )}
                     </td>
-                    <td className="px-5 py-3.5 whitespace-nowrap text-ink-600">
-                      {formatDateTime(e.created_at)}
+                    <td className="px-3 py-3.5">
+                      <span className="break-words text-[12px] tabular-nums text-ink-600">
+                        {formatDateTime(e.created_at)}
+                      </span>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

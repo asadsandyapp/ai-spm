@@ -62,8 +62,9 @@ export function useDashboardWebSocket(enabled = true) {
             if (!isMetricsPayload(msg.metrics)) return;
             qc.setQueryData(queryKeys.dashboardMetrics, msg.metrics);
             if (Array.isArray(msg.threats)) {
+              // WS only sends a short preview (≤5). Update the dashboard strip only —
+              // never overwrite Threat Feed caches (limit 25/50/100) with that slice.
               qc.setQueryData(queryKeys.threats(6), msg.threats);
-              qc.setQueryData(queryKeys.threats(50), msg.threats);
             }
           } else if (msg.type === "event") {
             void qc.invalidateQueries({ queryKey: queryKeys.dashboardMetrics });

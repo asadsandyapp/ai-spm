@@ -15,7 +15,6 @@
 5. [Coding Standards](#5-coding-standards)
 6. [AI Coding Rules](#6-ai-coding-rules)
 7. [Business Rules](#7-business-rules)
-   - [Cross-platform extensions & Safari (macOS)](#cross-platform-browser-extensions--safari-macos)
 8. [Database](#8-database)
 9. [APIs](#9-apis)
 10. [Frontend](#10-frontend)
@@ -82,7 +81,7 @@ flowchart TB
 | LLM **API** hosts (`api.openai.com`, `api.anthropic.com`, …) | Transparent MITM (iptables → agent `:9443`) | Agent → `POST /agent/v1/prompt?inspect_only=true` |
 | Consumer **web UIs** (`chatgpt.com`, `claude.ai`, `gemini.google.com`) | **mitmproxy** on `127.0.0.1:8800` + desktop HTTPS proxy (SPM-compatible; avoids CF Turnstile) | Addon masks org-enabled PII; fire-and-forget audit via agent `127.0.0.1:8092/web-audit` → gateway (**masked content only**). Threat feed includes `pii_detected`. Chrome uses GNOME proxy; Firefox (incl. snap) gets locked manual proxy via `/etc/firefox/policies/policies.json`. |
 
-> **Note:** Rust MITM of Cloudflare web UIs triggers Turnstile. The managed browser extension is **not** required. `browser-extension/` may remain in-tree for reference.
+> **Note:** Rust MITM of Cloudflare web UIs triggers Turnstile — use mitmproxy for those sites. There is **no** managed browser extension in the product.
 
 ### Major technologies
 
@@ -117,9 +116,8 @@ Python 3.12+ FastAPI, SQLAlchemy async, Alembic, PostgreSQL RLS, Redis, Kong, Re
 | **Threat** | Guardrails Hub when available; else heuristic patterns | Jailbreak / injection |
 | **LLM proxy** | OpenAI-compatible chat completions via org-scoped keys | Used when not `inspect_only` |
 | **Endpoint agent** | Rust workspace: `agent-core`, `agent-service`, `agent-installer`, `agent-tray` (stub) | |
-| **Browser extension** | Legacy / optional — **not** installed by default; network MITM covers web UIs | |
 | **Cloud** | TODO: document primary cloud target if pinned | Manifests are cloud-agnostic K8s |
-| **External APIs** | OpenAI / Anthropic / Google Generative Language (proxied); Stripe; AMO signing for Firefox XPI | |
+| **External APIs** | OpenAI / Anthropic / Google Generative Language (proxied); Stripe | |
 
 ---
 
@@ -134,9 +132,8 @@ AI-SPM/
 ├── backend/                  # FastAPI security core
 ├── frontend/                 # React SPA
 ├── agent/                    # Rust endpoint agent workspace
-├── browser-extension/        # MV3 Prompt Guard (web UI masking)
 ├── deploy/                   # Compose, Kong, K8s, Prometheus, Grafana, systemd
-├── scripts/                  # install-agent, reconcile extensions, certs, signing
+├── scripts/                  # install-agent, mitmproxy web UI, certs
 ├── docs/                     # DEVELOPER_SETUP, PHASES_2_4
 ├── infrastructure/certs/     # Dev / local CA material
 └── .github/workflows/        # CI
@@ -185,20 +182,6 @@ AI-SPM/
 | `installer/wix/` | Windows MSI | Packaging | Runtime config truth (use enrollment.env) |
 | `tests/integration/` | Rust integration tests | Agent-focused tests | Backend pytest |
 
-### `browser-extension/`
-
-| Path | Purpose | Belongs here | Never put here |
-|------|---------|--------------|----------------|
-| `manifest.json` | MV3 + gecko id | Permissions / matches | Secrets |
-| `inject.js` | MAIN-world fetch/XHR hooks | Prompt extraction / rewrite | Direct gateway calls (use bridge) |
-| `bridge.js` | ISOLATED world bridge | `postMessage` ↔ runtime | MITM CA logic |
-| `background.js` | Service worker → `127.0.0.1:8092` | Inspect API client | Storing raw PII |
-
-**Extension is part of the product for web UIs.** Do not delete or treat as throwaway. Do not make enterprise features *depend only* on a user manually installing from the store — install via `install-agent.sh` / reconcile policies.
-
-**Cross-platform:** The same CRX/XPI works on Windows and macOS Chromium/Firefox — only **installer/reconcile paths** differ. Safari needs a **separate native wrapper** (see [Cross-platform extensions & Safari](#cross-platform-browser-extensions--safari-macos)).
-
-TODO when Safari work starts: `browser-extension/safari/` (shared JS + Xcode notes) and/or `agent/installer/macos/` for pkg + MDM profiles.
 
 ### `deploy/`
 
@@ -208,10 +191,10 @@ Compose, Kong declarative config, K8s Deployment/HPA/ConfigMap, Prometheus, Graf
 
 | Script | Role |
 |--------|------|
-| `install-agent.sh` | Enterprise endpoint provisioning (loads `enrollment.env` when present); subcommands `uninstall`/`stop`, `refresh-extensions`. After install, also available as `sudo aispm-agent uninstall` |
+| `install-agent.sh` | Enterprise endpoint provisioning (loads `enrollment.env` when present); subcommands `uninstall`/`stop`, `web-mitm`, `cleanup-legacy-extension`. After install: `sudo aispm-agent uninstall` |
 | `build-linux-installer.sh` | Stage `dist/linux-installer` assets for sealed Admin Download Agent `.run` |
-| `reconcile-browser-extensions.sh` | Chromium forcelist + external_crx; Firefox policies + XPI staging |
-| `sign-firefox-extension.sh` | AMO-signed XPI (required for release Firefox) |
+| `mitmproxy/` | SPM-style web UI PII masking addon + starter (`web_ui_mitm.py`, `pii_rules.py`, `start-web-mitm.sh`) |
+| `fix-web-audit-bridge.sh` | Ensure local `:8092` web-audit bridge is enabled for Admin Audit |
 | `generate-certs.sh` | Dev CA / cert helpers |
 
 ---
@@ -259,7 +242,7 @@ Implemented in `backend/src/ai_spm/services/prompt_pipeline.py`:
 | 1–3 | Policy evaluation (model / topic / provider) | `PolicyEngine` + Redis | Block + audit `POLICY_VIOLATION` |
 | 4–5 | Inbound threat scan | `GuardrailsAdapter` | **Fail-closed** (backend) |
 | 6 | PII scan + mask | `PresidioAdapter` | **Fail-closed** (backend) |
-| — | `inspect_only=true` | Return `masked_messages` + decision; agent/extension rewrite client request | Skip LLM |
+| — | `inspect_only=true` | Return `masked_messages` + decision; agent rewrites client request | Skip LLM |
 | 7 | Forward to LLM (full proxy mode) | `OpenAIAdapter` | 502 on provider error |
 | 8 | Response PII scan | Presidio | **Fail-closed** |
 | 9 | Outbound threat scan | Guardrails | Block + audit |
@@ -298,7 +281,7 @@ agent-service start
   → load config (/etc/ai-spm/agent.env)
   → endpoint_setup (CA trust; optional iptables)
   → register (retry with backoff if gateway down)
-  → spawn: transparent listener | optional explicit proxy | heartbeat
+  → spawn: transparent listener | local_api (/web-audit) | optional explicit proxy | heartbeat
 ```
 
 Heartbeat every 60s; on agent 404 (deleted), re-register.
@@ -308,7 +291,7 @@ Heartbeat every 60s; on agent 404 (deleted), re-register.
 1. **Transparent network redirect** — enterprise default for AI **API** hosts (Linux iptables; Windows WFP TODO).
 2. **mitmproxy + desktop HTTPS proxy** — SPM-compatible path for Cloudflare web UIs (`chatgpt.com`, `claude.ai`, `gemini.google.com`).
 3. **Explicit system proxy to agent** — legacy / laboratory (`AISPM_EXPLICIT_PROXY_ENABLED`).
-4. **local_api** — **disabled by default**; legacy extension bridge only.
+4. **local_api `/web-audit`** — localhost bridge used by mitmproxy to record masked web-UI audits (enabled with transparent MITM / installer).
 
 Do **not** put CF web hosts back on Rust `should_mitm` without proving Turnstile still passes — use mitmproxy for those sites.
 
@@ -351,7 +334,7 @@ Constructor / fields → public entrypoints (`process_prompt`, `evaluate`) → p
 
 - Routes: translate domain errors to `HTTPException` with stable status codes.
 - Pipeline scanners: **fail-closed** on the backend (block if scanner errors).
-- Agent / extension: some paths currently **fail-open** so chat UX is not hard-broken when gateway/local_api is down — **do not silently flip to fail-closed** across all paths without product approval; if changing, update tests and this doc.
+- Agent / mitmproxy web-audit: some paths currently **fail-open** so chat UX is not hard-broken when gateway/local_api is down — **do not silently flip to fail-closed** across all paths without product approval; if changing, update tests and this doc.
 - Never swallow security failures without an audit event when a request was inspected.
 
 ### Logging
@@ -399,11 +382,11 @@ These are **mandatory** constraints for AI agents.
 11. Introduce new libraries / crates without approval.
 12. “Optimize” hot paths without profiling evidence and a request.
 13. Modify unrelated files to “improve structure.”
-14. Re-enable the managed browser extension or `local_api` as a required enterprise path without an explicit product decision (network MITM is the default control plane).
+14. Re-introduce a managed browser extension or change web-UI interception away from mitmproxy without an explicit product decision.
 15. Drop Cloudflare web hosts from MITM without documenting the breakage and updating this AGENTS.md.
 16. Store raw PII in `audit_events` or logs.
 17. Bypass `TenantContext` or use `get_platform_session` on tenant user routes.
-18. Commit secrets (`.env`, JWT keys, org tokens, AMO credentials).
+18. Commit secrets (`.env`, JWT keys, org tokens).
 
 ### Always
 
@@ -428,7 +411,7 @@ These are **mandatory** constraints for AI agents.
 
 ### Prompt workflows
 
-1. **inspect_only** (MITM + extension): pipeline steps 1–6 (+ audit/quota), return masked messages; client rewrites body and talks to provider.
+1. **inspect_only** (Rust MITM for API hosts): pipeline steps 1–6 (+ audit/quota), return masked messages; agent rewrites body and talks to provider.
 2. **Full proxy** (gateway holds provider key): continue through LLM + response scans.
 
 ### Permissions / roles
@@ -461,7 +444,7 @@ These are **mandatory** constraints for AI agents.
 - Rate-limited via Redis.
 - Platform tenant creation API may be absent — prefer signup / seed paths (TODO if product adds `POST /platform/v1/tenants`).
 
-### Extension vs MITM (product rule)
+### Interception product rule
 
 | Surface | Rule |
 |---------|------|
@@ -469,32 +452,9 @@ These are **mandatory** constraints for AI agents.
 | chatgpt.com / claude.ai / gemini.google.com | **mitmproxy** (SPM-style) + desktop proxy; Rust **passthrough** |
 | Enterprise install | Transparent API MITM + mitmproxy web service + CA trust |
 
-### Cross-platform browser extensions & Safari (macOS)
+---
 
-> **Deprecated for enterprise install.** The sections below are retained for historical reference and optional lab use. Shipping product uses **network MITM only**.
-
-#### One extension codebase for Chromium + Firefox (all OSes) — legacy
-
-Chrome/Edge/Brave/Chromium (**CRX**) and Firefox (**AMO-signed XPI**) are **browser-engine packages**, not OS packages. The same `browser-extension/` artifacts work on **Linux, Windows, and macOS** if re-enabled.
-
-| Artifact | OSes | What changes per OS |
-|----------|------|---------------------|
-| CRX + Chrome/Edge policies | Linux, Windows, macOS | Policy/file paths only |
-| Signed XPI + Firefox policies | Linux, Windows, macOS | Policy/XPI staging paths only |
-| Agent `local_api` `:8092` | All | Legacy inspect + `updates.xml` (off by default) |
-
-**Do not** fork `inject.js` / `bridge.js` / `background.js` per OS for Chrome or Firefox if the extension is revived.
-
-#### Safari — feasible, but a third deployment track (legacy)
-
-Safari **can** be supported for a future macOS agent via a signed host app + MDM. Prefer proving network MITM on macOS first; do not block the first macOS agent on Safari packaging.
-
-#### AI rules for Safari / macOS work
-
-- Do **not** invent a second Chromium/Firefox extension “for Mac.”
-- Do **not** claim Safari installs via `updates.xml` forcelist — that path is Chromium-only.
-- Do **not** treat Safari or the MV3 extension as required for enterprise web-UI masking (network MITM is primary).
-- Ask before re-enabling extension forcelist as a product default.
+## 8. Database
 
 ---
 
@@ -598,12 +558,11 @@ Sealed payload contents:
 | `enrollment.env` | `AISPM_GATEWAY_URL`, `AISPM_ORG_ID`, `AISPM_ORG_TOKEN`, `AISPM_ORG_NAME` (tenant bind) |
 | `aispm-agent-installer` | CLI launcher (Rust or shell) |
 | `aispm-agent-installer-gui.py` | Guided Tkinter install UI |
-| `install-agent.sh` | Privileged engine (`pkexec`/`sudo`) — agent + network MITM + **managed extension** |
-| `reconcile-browser-extensions.sh` | Enterprise policies for Chrome-family + Firefox |
-| `browser-extension/` | Legacy Prompt Guard sources (not installed by default) |
+| `install-agent.sh` | Privileged engine (`pkexec`/`sudo`) — agent + network MITM + mitmproxy web UI |
+| `mitmproxy/` | Web UI masking addon + starter scripts |
 | `agent-service` | Prebuilt agent binary when packaging ran |
 
-**Tenant isolation (SaaS):** Each admin downloads a package stamped with **their** `org_id` + rotating `org_token`. The endpoint agent registers with that org only (mTLS SAN embeds `org_id`). The extension talks only to the local agent (`127.0.0.1:8092`); the agent talks to the gateway as that tenant. Admin JWT + RLS ensure one org never sees another org’s agents, prompts, or audit. Platform admins get metadata only — never audit bodies.
+**Tenant isolation (SaaS):** Each admin downloads a package stamped with **their** `org_id` + rotating `org_token`. The endpoint agent registers with that org only (mTLS SAN embeds `org_id`). mitmproxy posts masked web audits to the local agent (`127.0.0.1:8092/web-audit`); the agent talks to the gateway as that tenant. Admin JWT + RLS ensure one org never sees another org’s agents, prompts, or audit. Platform admins get metadata only — never audit bodies.
 
 Employees run: `chmod +x aispm-agent-linux-*.run && ./aispm-agent-linux-*.run`. They approve **one** OS password prompt (pkexec/sudo); install is automatic (agent + transparent MITM + CA trust). No terminal typing required beyond the `.run`. After install, reopen browsers so the MITM CA is picked up.
 
@@ -630,7 +589,7 @@ Gateway URL stamped into packages: `AISPM_PUBLIC_GATEWAY_URL` (default `http://l
 
 ### Local agent HTTP (not Kong)
 
-`http://127.0.0.1:8092` — extension inspect + CRX/`updates.xml` packaging endpoints. Only localhost.
+`http://127.0.0.1:8092` — mitmproxy web-audit bridge (`POST /web-audit`). Only localhost.
 
 ### Frontend API base URL
 
@@ -797,20 +756,12 @@ sudo AISPM_GATEWAY_URL="https://gateway.example.com" \
   AISPM_ORG_TOKEN="<org-token>" \
   ./scripts/install-agent.sh
 
-sudo ./scripts/install-agent.sh refresh-extensions
-sudo ./scripts/install-agent.sh stop
+sudo ./scripts/install-agent.sh uninstall
+# Optional: strip leftover extension policies from older installs
+sudo ./scripts/install-agent.sh cleanup-legacy-extension
 ```
 
-**Order for extension reload:** agent running (serves `:8092` updates.xml) → then open Chrome. Policy uses `ExtensionInstallForcelist` pointing at `http://127.0.0.1:8092/extension/updates.xml`.
-
-### Firefox
-
-Release Firefox requires Mozilla-signed XPI. Re-sign after version bumps:
-
-```bash
-AMO_JWT_ISSUER=... AMO_JWT_SECRET=... ./scripts/sign-firefox-extension.sh
-sudo ./scripts/install-agent.sh refresh-extensions
-```
+After install, reopen browsers so the MITM CA and desktop/Firefox proxy policy are picked up. Web UI masking uses mitmproxy on `127.0.0.1:8800`.
 
 ### Build commands
 
@@ -830,7 +781,7 @@ sudo ./scripts/install-agent.sh refresh-extensions
 ### Rollback
 
 - App: redeploy previous image / git SHA; Alembic downgrade only with explicit DBA approval.
-- Agent: previous binary + `systemctl restart ai-spm-agent`; extension version via `external_version` / updates.xml.
+- Agent: previous binary + `systemctl restart ai-spm-agent`; web mitmproxy unit `ai-spm-web-mitm`.
 - TODO: formal blue/green procedure if not yet written for your environment.
 
 ### Important ports (this repo’s Compose defaults)
@@ -842,7 +793,7 @@ sudo ./scripts/install-agent.sh refresh-extensions
 | 8090→8000 | Kong → API |
 | 8000 | API in-container / `backend-dev` |
 | 5173 | Vite |
-| 8092 | Agent local_api |
+| 8092 | Agent local_api (`/web-audit` for mitmproxy) |
 | 9443 | Transparent redirect target |
 | 9090 / 3001 | Prometheus / Grafana |
 
@@ -850,14 +801,14 @@ sudo ./scripts/install-agent.sh refresh-extensions
 
 ## 15. Common Mistakes AI Must Avoid
 
-1. **Assuming web UIs still need the browser extension** — outdated; enterprise default is network MITM for ChatGPT/Claude/Gemini sites.
-2. **Re-enabling ExtensionInstallForcelist without product approval** — extension path is legacy; do not restore as required install.
+1. **Assuming web UIs need a browser extension** — enterprise default is mitmproxy + desktop proxy for ChatGPT/Claude/Gemini sites.
+2. **Putting CF web hosts back on Rust MITM** without proving Turnstile still passes.
 3. **Dropping QUIC block** — HTTP/3 bypasses TLS inspection if UDP/443 is open.
 4. **Opening browsers before agent/CA are ready** after install — MITM cert trust requires restart.
 5. **Bypassing services / TenantContext** from routes.
 6. **Writing raw SQL without org_id** or using platform session for tenant data.
 7. **Storing unmasked prompts** in audit or logs.
-8. **Duplicating PII/threat logic** in the agent instead of the gateway pipeline.
+8. **Duplicating PII/threat logic** in the agent instead of the gateway / mitmproxy path.
 9. **Hardcoding gateway ports** inconsistently (8080 vs 8090) — check `deploy/docker-compose.yml` and `frontend/.env`.
 10. **Creating a new agent row every reinstall** — must stay idempotent by hostname or quotas exhaust (429).
 11. **Driving enterprise UX via “ask user to load unpacked extension”** — not applicable; network MITM only.
@@ -867,9 +818,7 @@ sudo ./scripts/install-agent.sh refresh-extensions
 15. **Mixing admin JWT into agent routes** or vice versa.
 16. **Ignoring Cloudflare verify loops after MITM changes** — treat as a product incident; fix fingerprint/upstream, don’t silently disable masking.
 17. **Scope creep refactors** while fixing a single bug.
-18. **Forking Chrome/Firefox extensions per OS** — extension is legacy; if revived, still one CRX/XPI.
-19. **Treating Safari like Chrome forcelist** — Safari needs a signed host `.app` + MDM (legacy notes only).
-20. **Blocking the first macOS agent on Safari** — ship agent MITM first.
+18. **Removing `/web-audit` on `:8092`** — required for Admin Audit of web-UI masks.
 
 ---
 
@@ -878,7 +827,7 @@ sudo ./scripts/install-agent.sh refresh-extensions
 ### New features
 
 1. Confirm enterprise fit (agent install / auto start / mask before send / correct interception path).  
-2. Locate the owning module (pipeline vs agent proxy vs extension vs admin UI).  
+2. Locate the owning module (pipeline vs agent proxy vs mitmproxy vs admin UI).  
 3. Implement minimal change; reuse adapters.  
 4. Add/adjust tests (security tests if tenancy touched).  
 5. Update AGENTS.md / docs if topology or contracts change.  
@@ -886,7 +835,7 @@ sudo ./scripts/install-agent.sh refresh-extensions
 
 ### Bug fixes
 
-1. Reproduce with evidence (logs, `curl` to `/inspect` or `/agent/v1/prompt`, browser version pages).  
+1. Reproduce with evidence (logs, `curl` to `/agent/v1/prompt` or `:8092/web-audit`, browser version pages).  
 2. Narrowest fix; avoid “cleanup” in the same PR.  
 3. Prefer regression tests.
 
@@ -899,7 +848,7 @@ Only when requested. Preserve public APIs. No drive-by renames.
 - Tenant isolation intact?  
 - Pipeline order preserved?  
 - Fail mode intentional?  
-- Agent/extension contracts stable?  
+- Agent/mitmproxy contracts stable?  
 - Secrets absent?
 
 ### PRs
@@ -915,7 +864,7 @@ make test-security
 cd backend && pytest -v
 cd agent && cargo test --workspace
 cd frontend && npm run build
-# Extension: sudo ./scripts/install-agent.sh refresh-extensions
+# Web MITM refresh: sudo aispm-agent web-mitm
 ```
 
 ---
@@ -949,26 +898,20 @@ cd frontend && npm run build
 | `proxy/mitm.rs` | TLS MITM inspect/rewrite | inspect_only contract; CF challenge query preservation |
 | `proxy/parser.rs` | ChatGPT / Claude / Gemini body parse + rewrite | StreamGenerate `f.req` + JSON shapes |
 | `proxy/upstream.rs` | Chrome-fingerprint BoringSSL client | CF Turnstile compatibility |
-| `local_api.rs` | Legacy extension inspect + CRX updates | Disabled by default (`AISPM_LOCAL_API_ENABLED=false`) |
+| `local_api.rs` | Localhost `/web-audit` bridge for mitmproxy | Keep when transparent MITM / web UI masking is enabled |
 | `network_setup.rs` | iptables + QUIC block | QUIC bypass hole |
 | `gateway/client.rs` | mTLS client | Auth headers + registration retry semantics |
 | `heartbeat.rs` | Liveness / re-register | Permanent exit when unregistered |
 | `config.rs` | Env defaults | Enterprise default flags in installer |
 
-### Extension critical files
-
-| File | Purpose | Notes |
-|------|---------|-------|
-| `inject.js` | Hook fetch/XHR; ChatGPT / Claude / Gemini parsers | Provider-specific; test each site after edits. **Gemini:** only `StreamGenerate` (f.req `[null,"[[\"prompt\",0,…]]"]`); ignore `batchexecute` telemetry (`bard_activity_enabled`, `r_…` rpcids). |
-| `bridge.js` / `background.js` | Talk to local_api | Fail-open behavior intentional for UX in places |
-| `manifest.json` | Version + matches | Bump version when shipping; resign Firefox |
-
-### Installer / reconcile
+### Installer / web MITM
 
 | File | Purpose |
 |------|---------|
-| `scripts/install-agent.sh` | Enterprise endpoint provisioning |
-| `scripts/reconcile-browser-extensions.sh` | Chrome forcelist + external_crx + Firefox policies |
+| `scripts/install-agent.sh` | Enterprise endpoint provisioning (API MITM + mitmproxy) |
+| `scripts/mitmproxy/web_ui_mitm.py` | Web UI PII mask addon |
+| `scripts/mitmproxy/pii_rules.py` | Shared PII patterns for mitmproxy |
+| `scripts/mitmproxy/start-web-mitm.sh` | mitmproxy service starter |
 
 ### Frontend critical files
 
@@ -986,7 +929,7 @@ cd frontend && npm run build
 |----------|-----|----------|-------------------|
 | Network transparent MITM for **API** hosts | Universal coverage for SDKs/CLI | Requires local CA + QUIC block | Yes for enterprise |
 | **mitmproxy** for CF web UIs (SPM path) | Avoids Cloudflare Turnstile from Rust MITM | Desktop proxy + mitmproxy CA; email mask local in addon | Yes until gateway-wired web inspect ships |
-| **Managed extension deprecated** | Not required when mitmproxy covers web UIs | — | Prefer keep |
+| **Managed browser extension removed** | mitmproxy covers web UIs; extension dead code removed | Upgrade path via `cleanup-legacy-extension` | Yes |
 | Five-layer tenant isolation + RLS | Defense in depth for SaaS | Slight session complexity | **Hard requirement** |
 | Platform JWT cannot read audit bodies | Vendor ops without content exposure | Platform tooling less powerful | Yes |
 | Append-only masked audit | Compliance / forensics without secret sprawl | Admins never see raw PII by default | Prefer keep |
@@ -996,12 +939,9 @@ cd frontend && npm run build
 | Idempotent agent register by hostname | Reinstall must not burn agent quota | Hostname collisions rare | Prefer keep |
 | Org-bound sealed `.run` installer (Download Agent) | Single opaque file; embeds secrets; SHA refuses casual edit; no editable Scripts folder | Download rotates org token; determined attackers can still unpack | Prefer keep |
 | `AISPM_PUBLIC_GATEWAY_URL` for enrollment | Same packages work for localhost Kong and future cloud gateway | Operators must set URL correctly | Prefer keep |
-| `inspect_only` split | Agent keeps real upstream TLS to provider after mask | Two-phase protocol | Yes for MITM/extension |
+| `inspect_only` split | Agent keeps real upstream TLS to provider after mask | Two-phase protocol | Yes for API MITM |
 | Dev fallback regex PII without `[ml]` | Local bootstrapping | Weaker detection | Production should install `[ml]` |
-| Fail-open in some agent/extension error paths | Don’t hard-break employee chat when gateway down | Temporary unprotected window | **Product decision** — ask before flipping globally to fail-closed |
-| Same CRX/XPI on Linux / Windows / macOS | Legacy extension packaging notes | OS-specific reconcile only if revived | Legacy |
-| Safari = separate `.app` + MDM track | Apple packaging + no local forcelist/`updates.xml` | Extra Apple Developer / notarization / MDM cost | Legacy |
-| Do not block first macOS agent on Safari | Agent network MITM covers Mac traffic without Safari extension | Safari-only users unprotected until separate track | Prefer keep |
+| Fail-open in some agent/mitmproxy audit paths | Don’t hard-break employee chat when gateway down | Temporary unprotected window | **Product decision** — ask before flipping globally to fail-closed |
 
 ---
 
@@ -1033,8 +973,8 @@ Copy and mentally tick before every non-trivial change:
 5. Prefer **smallest possible diffs**.
 6. **Never assume requirements** — ask when product behavior, fail-open vs fail-closed, or deployment topology is unclear.
 7. **Explain the plan** before large or architectural changes.
-8. **Never delete** functionality (extension path, transparent redirect, RLS, security tests) without explicit approval.
-9. After changing pipeline, tenancy, agent proxy, or extension install: update tests and this document.
+8. **Never delete** functionality (transparent redirect, mitmproxy web path, RLS, security tests) without explicit approval.
+9. After changing pipeline, tenancy, agent proxy, or web-MITM install: update tests and this document.
 10. When blocked by missing information, insert a clear question or a `TODO:` in docs — do not fabricate endpoints, tables, or cloud providers.
 
 ### Quick enterprise fit questions
@@ -1046,7 +986,7 @@ Before implementing a feature:
 - Is sensitive data masked before the provider sees it?
 - Is AI API and web UI traffic handled at the network layer?
 
-If the answer depends on a user manually loading an unpacked extension for production, **stop and redesign**.
+If the answer depends on a browser extension for production web-UI masking, **stop and redesign** (use mitmproxy).
 
 ---
 

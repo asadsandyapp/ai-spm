@@ -8,7 +8,7 @@
 #
 #   sudo ./scripts/install-agent.sh
 #   sudo ./scripts/install-agent.sh uninstall   # full removal (also: stop)
-#   sudo ./scripts/install-agent.sh refresh-extensions  # legacy: strips leftover extension policies
+#   sudo ./scripts/install-agent.sh cleanup-legacy-extension  # strip leftover extension policies
 #
 # Configuration (env vars):
 #   AISPM_GATEWAY_URL          default http://localhost:8090
@@ -31,18 +31,12 @@ CA_CERT="${CA_DIR}/mitm-ca.crt"
 SYSTEM_CA_PATH="/usr/local/share/ca-certificates/ai-spm-mitm.crt"
 LOG_FILE="/var/log/ai-spm/agent.log"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-EXT_INSTALL_DIR="/opt/ai-spm/browser-extension"
-EXT_KEY="/opt/ai-spm/extension-key.pem"
-EXT_CRX="/opt/ai-spm/ai-spm-prompt-guard.crx"
-EXT_XPI="/opt/ai-spm/ai-spm-prompt-guard.xpi"
-EXT_XPI_SIGNED="/opt/ai-spm/ai-spm-prompt-guard-signed.xpi"
-EXT_ID_FILE="/opt/ai-spm/extension-id"
 CHROME_POLICY_DIR="/etc/opt/chrome/policies/managed"
-RECONCILE_SCRIPT="/usr/local/lib/ai-spm/reconcile-browser-extensions.sh"
+CHROMIUM_POLICY_DIR="/etc/chromium/policies/managed"
 INSTALLER_LIB="/usr/local/lib/ai-spm/install-agent.sh"
 UNINSTALL_BIN="/usr/local/sbin/aispm-agent-uninstall"
-RECONCILE_SERVICE="/etc/systemd/system/ai-spm-browser-reconcile.service"
-RECONCILE_TIMER="/etc/systemd/system/ai-spm-browser-reconcile.timer"
+LEGACY_RECONCILE_SERVICE="/etc/systemd/system/ai-spm-browser-reconcile.service"
+LEGACY_RECONCILE_TIMER="/etc/systemd/system/ai-spm-browser-reconcile.timer"
 WEB_MITM_SERVICE_NAME="ai-spm-web-mitm"
 WEB_MITM_UNIT="/etc/systemd/system/${WEB_MITM_SERVICE_NAME}.service"
 WEB_MITM_PORT="${AISPM_WEB_MITM_PORT:-8800}"
@@ -82,27 +76,6 @@ fi
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AGENT_DIR="${AISPM_AGENT_DIR:-${REPO_ROOT}/agent}"
 PACKAGE_BIN="${SCRIPT_DIR}/agent-service"
-
-# Resolve extension source next to install-agent.sh (sealed package) or from repo checkout.
-resolve_extension_src() {
-  if [[ -d "${SCRIPT_DIR}/browser-extension" && -f "${SCRIPT_DIR}/browser-extension/manifest.json" ]]; then
-    echo "${SCRIPT_DIR}/browser-extension"
-  elif [[ -d "${REPO_ROOT}/browser-extension" && -f "${REPO_ROOT}/browser-extension/manifest.json" ]]; then
-    echo "${REPO_ROOT}/browser-extension"
-  else
-    echo ""
-  fi
-}
-
-resolve_reconcile_script_src() {
-  if [[ -f "${SCRIPT_DIR}/reconcile-browser-extensions.sh" ]]; then
-    echo "${SCRIPT_DIR}/reconcile-browser-extensions.sh"
-  elif [[ -f "${REPO_ROOT}/scripts/reconcile-browser-extensions.sh" ]]; then
-    echo "${REPO_ROOT}/scripts/reconcile-browser-extensions.sh"
-  else
-    echo ""
-  fi
-}
 
 GATEWAY_URL="${AISPM_GATEWAY_URL:-http://localhost:8090}"
 ORG_ID="${AISPM_ORG_ID:-2117eef6-a519-47d5-bd6b-8a7357dafbb7}"
@@ -396,183 +369,9 @@ install_nss_for_desktop_user() {
   rm -f "${ca_readable}" 2>/dev/null || true
 }
 
-compute_extension_id() {
-  python3 - "$1" <<'PY'
-import hashlib, subprocess, sys
-der = subprocess.check_output(["openssl", "rsa", "-in", sys.argv[1], "-pubout", "-outform", "DER"])
-d = hashlib.sha256(der).digest()
-print("".join(chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in d[:16]))
-PY
-}
-
-install_managed_extension() {
-  echo "→ Packaging managed browser extension (enterprise web-UI masking)..."
-  local ext_src
-  ext_src="$(resolve_extension_src)"
-  if [[ -z "${ext_src}" ]]; then
-    echo "ERROR: browser-extension sources missing from this installer package." >&2
-    echo "  Re-download from Admin → Download Agent after rebuilding assets (make installer-linux)." >&2
-    exit 1
-  fi
-  echo "  Extension source: ${ext_src}"
-
-  install -d -m 0755 /opt/ai-spm
-  rm -rf "${EXT_INSTALL_DIR}"
-  mkdir -p "${EXT_INSTALL_DIR}"
-  cp -a "${ext_src}/." "${EXT_INSTALL_DIR}/"
-  rm -f "${EXT_INSTALL_DIR}/.amo-upload-uuid" 2>/dev/null || true
-  if [[ ! -f "${EXT_INSTALL_DIR}/manifest.json" ]]; then
-    echo "ERROR: browser-extension/manifest.json missing after copy." >&2
-    exit 1
-  fi
-  # Sealed .run extracts with go-rwx; agent (aispm) must read manifest for updates.xml.
-  # Without this, local_api falls back to version 1.0.9 and Chrome forcelist fails.
-  chmod 755 "${EXT_INSTALL_DIR}"
-  find "${EXT_INSTALL_DIR}" -type d -exec chmod 755 {} +
-  find "${EXT_INSTALL_DIR}" -type f -exec chmod 644 {} +
-  chown -R root:root "${EXT_INSTALL_DIR}" 2>/dev/null || true
-
-  # Stable Chromium extension ID across reinstalls (same vendor key in every .run).
-  if [[ -f "${SCRIPT_DIR}/extension-key.pem" ]]; then
-    install -m 600 "${SCRIPT_DIR}/extension-key.pem" "${EXT_KEY}"
-  elif [[ ! -f "${EXT_KEY}" ]]; then
-    openssl genrsa -out "${EXT_KEY}" 2048 2>/dev/null
-    chmod 600 "${EXT_KEY}"
-  fi
-
-  local chrome_bin=""
-  for c in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable brave-browser vivaldi; do
-    if command -v "${c}" >/dev/null 2>&1; then
-      chrome_bin="${c}"
-      break
-    fi
-  done
-
-  rm -f "${EXT_INSTALL_DIR}.crx" "${EXT_CRX}" "${EXT_XPI}"
-  if [[ -n "${chrome_bin}" ]]; then
-    local pack_dir="/tmp/ai-spm-ext-pack-$$"
-    cp -a "${EXT_INSTALL_DIR}" "${pack_dir}"
-    cp "${EXT_KEY}" "${pack_dir}.pem"
-    chown -R "${REAL_USER}:${REAL_USER}" "${pack_dir}" "${pack_dir}.pem" 2>/dev/null || true
-    sudo -u "${REAL_USER}" "${chrome_bin}" \
-      --pack-extension="${pack_dir}" \
-      --pack-extension-key="${pack_dir}.pem" 2>/dev/null || true
-    if [[ -f "${pack_dir}.crx" ]]; then
-      install -m 0644 "${pack_dir}.crx" "${EXT_CRX}"
-      echo "  Packaged ${EXT_CRX}"
-    else
-      echo "  WARNING: CRX packaging failed." >&2
-    fi
-    rm -rf "${pack_dir}" "${pack_dir}.pem" 2>/dev/null || true
-  else
-    echo "  WARNING: no Chromium-family browser found — CRX packaging skipped." >&2
-    echo "  Policies will still be written; reopen browser after Chrome/Chromium is installed." >&2
-  fi
-
-  python3 - <<PY
-import pathlib, zipfile
-src = pathlib.Path("${EXT_INSTALL_DIR}")
-dst = pathlib.Path("${EXT_XPI}")
-with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
-    for path in src.rglob("*"):
-        if path.is_file() and path.name != ".amo-upload-uuid":
-            zf.write(path, path.relative_to(src))
-PY
-  chmod 0644 "${EXT_XPI}"
-  echo "  Packaged ${EXT_XPI}"
-
-  compute_extension_id "${EXT_KEY}" > "${EXT_ID_FILE}"
-  chmod 0644 "${EXT_ID_FILE}" 2>/dev/null || true
-  echo "  Extension ID: $(cat "${EXT_ID_FILE}")"
-
-  stage_signed_firefox_xpi
-}
-
-wait_for_extension_local_api() {
-  echo "→ Waiting for agent extension endpoint (http://127.0.0.1:8092)…"
-  # Chrome forcelist downloads CRX from the agent — must be up before browsers reopen.
-  local i
-  for i in $(seq 1 30); do
-    if curl -sf --max-time 1 "http://127.0.0.1:8092/extension/updates.xml" >/dev/null 2>&1; then
-      echo "  Extension updates.xml is reachable."
-      return 0
-    fi
-    sleep 1
-  done
-  echo "ERROR: local_api not reachable on :8092 — Chrome cannot auto-install Prompt Guard." >&2
-  echo "  Check: systemctl status ${SERVICE_NAME} && journalctl -u ${SERVICE_NAME} -n 50" >&2
-  echo "  Agent log: /var/log/ai-spm/agent.log" >&2
-  return 1
-}
-
-# Stage a Mozilla-signed Firefox XPI if the vendor shipped one. This is a
-# one-time signing artifact (AMO unlisted / self-distribution) that makes the
-# extension installable on standard Firefox release builds for every user.
-# Lookup order: explicit env var, then known repo locations.
-packaged_extension_version() {
-  python3 - "$1" <<'PY'
-import json, sys, zipfile
-path = sys.argv[1]
-try:
-    with zipfile.ZipFile(path) as zf:
-        data = json.loads(zf.read("manifest.json"))
-    print(data.get("version", ""))
-except Exception:
-    print("")
-PY
-}
-
-stage_signed_firefox_xpi() {
-  local manifest_ver signed_ver=""
-  manifest_ver="$(python3 -c "import json; print(json.load(open('${EXT_INSTALL_DIR}/manifest.json'))['version'])")"
-  local candidates=(
-    "${AISPM_FIREFOX_SIGNED_XPI:-}"
-    "${SCRIPT_DIR}/browser-extension/ai-spm-prompt-guard-signed.xpi"
-    "${SCRIPT_DIR}/ai-spm-prompt-guard-signed.xpi"
-    "${REPO_ROOT}/browser-extension/ai-spm-prompt-guard-signed.xpi"
-    "${REPO_ROOT}/browser-extension-signed/ai-spm-prompt-guard.xpi"
-    "${REPO_ROOT}/dist/ai-spm-prompt-guard-signed.xpi"
-  )
-  local src
-  for src in "${candidates[@]}"; do
-    [[ -n "${src}" && -f "${src}" ]] || continue
-    signed_ver="$(packaged_extension_version "${src}")"
-    if [[ "${signed_ver}" == "${manifest_ver}" ]]; then
-      install -m 0644 "${src}" "${EXT_XPI_SIGNED}"
-      echo "  Staged Mozilla-signed Firefox XPI from ${src} (v${signed_ver})"
-      return 0
-    fi
-    if [[ -n "${signed_ver}" ]]; then
-      echo "  Note: signed Firefox XPI at ${src} is v${signed_ver} (source v${manifest_ver})."
-      echo "  Staging it anyway — release Firefox requires a signed build."
-      echo "  Re-sign for latest fixes: scripts/sign-firefox-extension.sh"
-      install -m 0644 "${src}" "${EXT_XPI_SIGNED}"
-      return 0
-    fi
-    install -m 0644 "${src}" "${EXT_XPI_SIGNED}"
-    echo "  Staged Mozilla-signed Firefox XPI from ${src}"
-    return 0
-  done
-  rm -f "${EXT_XPI_SIGNED}" 2>/dev/null || true
-  echo "  No current signed Firefox XPI found — Firefox release builds require one."
-  echo "  Sign once with: scripts/sign-firefox-extension.sh (AMO unlisted)."
-}
-
-install_reconcile_script() {
-  echo "→ Installing browser extension reconciler..."
-  local src
-  src="$(resolve_reconcile_script_src)"
-  if [[ -z "${src}" ]]; then
-    echo "ERROR: reconcile-browser-extensions.sh missing from installer package." >&2
-    exit 1
-  fi
-  install -d -m 0755 "$(dirname "${RECONCILE_SCRIPT}")"
-  install -m 0755 "${src}" "${RECONCILE_SCRIPT}"
-}
-
 # Keep a local copy of this installer so uninstall works without the git repo / sealed .run.
 install_local_management_tools() {
-  echo "→ Installing local management tools (uninstall / refresh)…"
+  echo "→ Installing local management tools (uninstall / web-mitm)…"
   install -d -m 0755 "$(dirname "${INSTALLER_LIB}")"
   install -m 0755 "${BASH_SOURCE[0]}" "${INSTALLER_LIB}"
 
@@ -598,22 +397,22 @@ install_local_management_tools() {
 exec bash "${INSTALLER_LIB}" uninstall "\$@"
 EOF
   chmod 0755 "${UNINSTALL_BIN}"
-  # Convenience: aispm-agent uninstall | web-mitm | refresh-extensions
+  # Convenience: aispm-agent uninstall | web-mitm | cleanup-legacy-extension
   cat > /usr/local/sbin/aispm-agent <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cmd="\${1:-}"
 shift || true
 case "\${cmd}" in
-  uninstall|stop|remove|refresh-extensions|web-mitm|install-web-mitm)
+  uninstall|stop|remove|cleanup-legacy-extension|refresh-extensions|web-mitm|install-web-mitm)
     exec bash "${INSTALLER_LIB}" "\${cmd}" "\$@"
     ;;
   ""|-h|--help|help)
-    echo "Usage: aispm-agent {uninstall|web-mitm|refresh-extensions}"
+    echo "Usage: aispm-agent {uninstall|web-mitm|cleanup-legacy-extension}"
     exit 0
     ;;
   *)
-    echo "Usage: aispm-agent {uninstall|web-mitm|refresh-extensions}" >&2
+    echo "Usage: aispm-agent {uninstall|web-mitm|cleanup-legacy-extension}" >&2
     exit 1
     ;;
 esac
@@ -621,50 +420,76 @@ EOF
   chmod 0755 /usr/local/sbin/aispm-agent
 }
 
-write_reconcile_units() {
-  echo "→ Installing browser extension reconcile timer..."
-  cat > "${RECONCILE_SERVICE}" <<EOF
-[Unit]
-Description=AI-SPM Browser Extension Reconciler
-After=network-online.target ai-spm-agent.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=${RECONCILE_SCRIPT} install
-EOF
-
-  cat > "${RECONCILE_TIMER}" <<EOF
-[Unit]
-Description=Periodic AI-SPM Browser Extension Reconciler
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-Unit=ai-spm-browser-reconcile.service
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-  chmod 0644 "${RECONCILE_SERVICE}" "${RECONCILE_TIMER}"
-  systemctl daemon-reload
-}
-
-run_browser_reconcile() {
-  echo "→ Reconciling managed browser extensions..."
-  "${RECONCILE_SCRIPT}" install
-}
-
-enable_reconcile_timer() {
-  echo "→ Enabling browser extension reconcile timer..."
-  systemctl enable --now ai-spm-browser-reconcile.timer >/dev/null
-}
-
 remove_browser_extension_integration() {
-  "${RECONCILE_SCRIPT}" remove 2>/dev/null || true
-  rm -f "${RECONCILE_SERVICE}" "${RECONCILE_TIMER}"
-  systemctl daemon-reload
+  # Strip leftover managed-extension policies from older installs.
+  systemctl stop ai-spm-browser-reconcile.timer 2>/dev/null || true
+  systemctl disable ai-spm-browser-reconcile.timer 2>/dev/null || true
+  systemctl stop ai-spm-browser-reconcile.service 2>/dev/null || true
+  rm -f "${LEGACY_RECONCILE_SERVICE}" "${LEGACY_RECONCILE_TIMER}"
+  rm -f /usr/local/lib/ai-spm/reconcile-browser-extensions.sh
+  rm -f /opt/ai-spm/updates.xml /opt/ai-spm/extension-id \
+        /opt/ai-spm/extension-key.pem \
+        /opt/ai-spm/ai-spm-prompt-guard.crx \
+        /opt/ai-spm/ai-spm-prompt-guard.xpi \
+        /opt/ai-spm/ai-spm-prompt-guard-signed.xpi \
+        /etc/firefox/policies/ai-spm-prompt-guard.xpi
+  rm -rf /opt/ai-spm/browser-extension
+  for dir in "${CHROME_POLICY_DIR}" "${CHROMIUM_POLICY_DIR}" \
+             /etc/opt/chrome/policies/recommended \
+             /etc/chromium/policies/recommended \
+             "/etc/opt/edge/policies/managed" \
+             "/etc/brave/policies/managed"; do
+    [[ -d "${dir}" ]] || continue
+    rm -f "${dir}/ai-spm-extension.json" "${dir}/ai_spm_extension.json" \
+          "${dir}/aispm-extension.json" 2>/dev/null || true
+    for f in "${dir}"/*.json; do
+      [[ -f "${f}" ]] || continue
+      python3 - "${f}" <<'PY' || true
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    raise SystemExit(0)
+changed = False
+for key in ("ExtensionInstallForcelist", "ExtensionInstallSources", "ExtensionSettings"):
+    if key in data:
+        data.pop(key, None)
+        changed = True
+if changed:
+    if data:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+    else:
+        import os
+        os.remove(path)
+PY
+    done
+  done
+  if [[ -f "${FIREFOX_POLICY_FILE}" ]]; then
+    python3 - "${FIREFOX_POLICY_FILE}" <<'PY' || true
+import json, os, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    raise SystemExit(0)
+policies = data.get("policies", {})
+if "ExtensionSettings" in policies:
+    policies.pop("ExtensionSettings", None)
+    if policies:
+        data["policies"] = policies
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+    else:
+        os.remove(path)
+PY
+  fi
+  systemctl daemon-reload 2>/dev/null || true
 }
 
 kill_browser_processes() {
@@ -676,8 +501,8 @@ kill_browser_processes() {
 }
 
 clear_extension_profile_caches() {
-  local ext_id
-  ext_id="$(cat "${EXT_ID_FILE}" 2>/dev/null || true)"
+  local ext_id=""
+  [[ -f /opt/ai-spm/extension-id ]] && ext_id="$(cat /opt/ai-spm/extension-id 2>/dev/null || true)"
 
   if [[ -n "${REAL_HOME}" && -n "${ext_id}" ]]; then
     while IFS= read -r -d '' d; do
@@ -690,33 +515,6 @@ clear_extension_profile_caches() {
         -o -path "*/Managed Extension Settings/${ext_id}" \
         -o -path "*/Extension State/${ext_id}" \) \
       -print0 2>/dev/null || true)
-
-    # Policy/external extensions store version in Preferences, not always under Extensions/.
-    while IFS= read -r -d '' prefs; do
-      if python3 - "${prefs}" "${ext_id}" <<'PY'
-import json, sys
-path, ext_id = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    data = json.load(fh)
-changed = False
-ext = data.get("extensions", {})
-settings = ext.get("settings", {})
-if ext_id in settings:
-    del settings[ext_id]
-    changed = True
-for key in ("install_signature", "last_chrome_version"):
-    if key in ext:
-        ext.pop(key, None)
-        changed = True
-if changed:
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, separators=(",", ":"))
-PY
-      then
-        :
-      fi
-    done < <(find "${REAL_HOME}/.config/google-chrome" "${REAL_HOME}/.config/chromium" \
-      "${REAL_HOME}/snap" -name "Preferences" -print0 2>/dev/null || true)
   fi
 
   if [[ -n "${REAL_HOME}" ]]; then
@@ -727,18 +525,18 @@ PY
   fi
 }
 
-# Legacy no-op: browser extension path removed; network MITM is the sole web-UI control.
-refresh_browser_extensions() {
+# Strip leftover browser-extension policies from older AI-SPM installs.
+cleanup_legacy_extension() {
   require_root
-  echo "AI-SPM: managed browser extension is disabled."
-  echo "  Prompt masking uses network MITM only — no extension refresh needed."
+  echo "AI-SPM: removing leftover managed-extension policies (network MITM only)."
   export AISPM_DESKTOP_USER="${REAL_USER}"
   export SUDO_USER="${REAL_USER}"
   kill_browser_processes || true
   remove_browser_extension_integration || true
   clear_extension_profile_caches || true
-  echo "  Removed any leftover extension policies/caches."
+  echo "  Done."
 }
+
 
 start_service() {
   echo "→ Enabling and starting ${SERVICE_NAME}..."
@@ -810,33 +608,6 @@ _persist_agent_id_from_cert() {
   else
     echo "AISPM_AGENT_ID=${agent_id}" >> "${ENV_FILE}"
   fi
-}
-
-verify_inspect_path() {
-  echo "→ Verifying prompt inspection path…"
-  local out
-  out="$(curl -sf --max-time 8 -X POST "http://127.0.0.1:8092/inspect" \
-    -H "Content-Type: application/json" \
-    -d '{"provider":"openai","model":"gpt-4o","messages":[{"role":"user","content":"contact me at verify-install@example.com"}]}' 2>/dev/null || true)"
-  if [[ -z "${out}" ]]; then
-    echo "  WARNING: local inspect API did not respond (masking may fail until agent is healthy)." >&2
-    return 0
-  fi
-  if echo "${out}" | grep -q 'agent not registered'; then
-    echo "ERROR: inspect path still reports agent not registered." >&2
-    return 1
-  fi
-  if echo "${out}" | grep -qiE 'verify-install@example\.com|masked_messages|MASKED|EMAIL|pii|decision'; then
-    if echo "${out}" | grep -q 'verify-install@example.com' \
-      && ! echo "${out}" | grep -qiE 'MASKED|masked_messages|"decision":"(masked|allowed)"'; then
-      echo "  WARNING: inspect returned without clear masking — check admin policies/PII engine." >&2
-    else
-      echo "  Inspection path OK (gateway reachable from agent)."
-    fi
-    return 0
-  fi
-  echo "  Inspection path responded."
-  return 0
 }
 
 remove_nss_ca_for_desktop_user() {
@@ -1080,27 +851,8 @@ policies = data.setdefault("policies", {})
 policies["Proxy"] = proxy
 # DoH can interfere with proxy routing on some Firefox builds.
 policies["DNSOverHTTPS"] = {"Enabled": False}
-# Force-install Prompt Guard for Firefox Private/guest (composer mask before encrypt).
-xpi_deploy = "/etc/firefox/policies/ai-spm-prompt-guard.xpi"
-xpi_sources = [
-    "/opt/ai-spm/browser-extension/ai-spm-prompt-guard-signed.xpi",
-    "/opt/ai-spm/ai-spm-prompt-guard-signed.xpi",
-]
-import os, shutil
-if not os.path.isfile(xpi_deploy):
-    os.makedirs(os.path.dirname(xpi_deploy), exist_ok=True)
-    for src in xpi_sources:
-        if os.path.isfile(src):
-            shutil.copy2(src, xpi_deploy)
-            break
-if os.path.isfile(xpi_deploy):
-    policies["ExtensionSettings"] = {
-        "prompt-guard@aispm.io": {
-            "installation_mode": "force_installed",
-            "install_url": f"file://{xpi_deploy}",
-            "private_browsing": True,
-        }
-    }
+# Ensure legacy Prompt Guard force-install is not present.
+policies.pop("ExtensionSettings", None)
 with open(path, "w", encoding="utf-8") as fh:
     json.dump(data, fh, indent=2)
     fh.write("\n")
@@ -1226,12 +978,12 @@ uninstall_agent() {
   clear_extension_profile_caches
 
   echo "→ Removing systemd units…"
-  rm -f "${UNIT_FILE}" "${RECONCILE_SERVICE}" "${RECONCILE_TIMER}" "${WEB_MITM_UNIT}"
+  rm -f "${UNIT_FILE}" "${LEGACY_RECONCILE_SERVICE}" "${LEGACY_RECONCILE_TIMER}" "${WEB_MITM_UNIT}"
   systemctl daemon-reload 2>/dev/null || true
   systemctl reset-failed "${SERVICE_NAME}" 2>/dev/null || true
 
   echo "→ Removing agent binary and local packages…"
-  rm -f "${INSTALL_BIN}" "${RECONCILE_SCRIPT}" "${UNINSTALL_BIN}" /usr/local/sbin/aispm-agent
+  rm -f "${INSTALL_BIN}" "${UNINSTALL_BIN}" /usr/local/sbin/aispm-agent /usr/local/lib/ai-spm/reconcile-browser-extensions.sh
   # Remove lib dir last (contains this script when run from INSTALLER_LIB).
   rm -rf /opt/ai-spm /usr/local/lib/ai-spm
   rm -f "${INSTALLER_LIB}" 2>/dev/null || true
@@ -1264,8 +1016,8 @@ main() {
       uninstall_agent
       exit 0
       ;;
-    refresh-extensions)
-      refresh_browser_extensions
+    cleanup-legacy-extension|refresh-extensions)
+      cleanup_legacy_extension
       exit 0
       ;;
     web-mitm|install-web-mitm)
@@ -1305,23 +1057,15 @@ main() {
   install_nss_for_desktop_user
   install_local_management_tools
 
-  # Network MITM is the sole interception path — silently purge any legacy extension state.
+  # Network MITM is the sole interception path — purge leftover extension state.
   export AISPM_DESKTOP_USER="${REAL_USER}"
   export SUDO_USER="${REAL_USER}"
   {
     kill_browser_processes
-    rec_src="$(resolve_reconcile_script_src)"
-    if [[ -n "${rec_src}" ]]; then
-      bash "${rec_src}" remove || bash "${rec_src}" purge-stale || true
-    fi
     remove_browser_extension_integration
     clear_extension_profile_caches
-    systemctl disable --now ai-spm-browser-reconcile.timer || true
-    systemctl disable --now ai-spm-browser-reconcile.service || true
-    rm -f /etc/systemd/system/ai-spm-browser-reconcile.timer \
-          /etc/systemd/system/ai-spm-browser-reconcile.service || true
-    systemctl daemon-reload || true
   } >/dev/null 2>&1
+
 
   systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || true
   sleep 2

@@ -244,12 +244,11 @@ class EnrollmentService:
     def _installer_ready(self) -> bool:
         root = installer_asset_dir()
         has_engine = (root / "aispm-agent-installer").is_file() or (root / "install-agent.sh").is_file()
-        has_ext = (root / "browser-extension" / "manifest.json").is_file()
-        # Repo fallback when staging dir not yet refreshed (dev).
-        if not has_ext:
-            repo_ext = Path(__file__).resolve().parents[4] / "browser-extension" / "manifest.json"
-            has_ext = repo_ext.is_file()
-        return has_engine and has_ext
+        has_mitm = (root / "mitmproxy" / "web_ui_mitm.py").is_file()
+        if not has_mitm:
+            repo_mitm = Path(__file__).resolve().parents[4] / "scripts" / "mitmproxy" / "web_ui_mitm.py"
+            has_mitm = repo_mitm.is_file()
+        return has_engine and has_mitm
 
     async def rotate_org_token(self, session: AsyncSession, org_id: UUID) -> tuple[Organization, str]:
         org = await self.get_org(session, org_id)
@@ -289,28 +288,13 @@ class EnrollmentService:
                 "aispm-agent-installer-gui.py",
                 "run-install-cli.sh",
                 "install-agent.sh",
-                "reconcile-browser-extensions.sh",
                 "agent-service",
-                "extension-key.pem",
             )
             for name in names:
                 path = root / name
                 if not path.is_file():
                     continue
                 tar.add(path, arcname=name, recursive=False)
-
-            # Prompt Guard sources — optional legacy (not installed by default).
-            ext_dir = root / "browser-extension"
-            if not (ext_dir.is_dir() and (ext_dir / "manifest.json").is_file()):
-                ext_dir = _repo_dir("browser-extension") or Path()
-            if ext_dir.is_dir() and (ext_dir / "manifest.json").is_file():
-                for path in sorted(ext_dir.rglob("*")):
-                    if not path.is_file():
-                        continue
-                    if path.name.startswith(".") or path.name == ".amo-upload-uuid":
-                        continue
-                    arc = f"browser-extension/{path.relative_to(ext_dir).as_posix()}"
-                    tar.add(path, arcname=arc, recursive=False)
 
             # SPM-style mitmproxy addon for ChatGPT / Claude / Gemini web UIs.
             # Required on every endpoint install — do not ship a package without it.
@@ -334,11 +318,6 @@ class EnrollmentService:
                 repo_script = _repo_file("scripts", "install-agent.sh")
                 if repo_script is not None:
                     tar.add(repo_script, arcname="install-agent.sh")
-
-            if not any(m.name == "reconcile-browser-extensions.sh" for m in tar.getmembers()):
-                repo_rec = _repo_file("scripts", "reconcile-browser-extensions.sh")
-                if repo_rec is not None:
-                    tar.add(repo_rec, arcname="reconcile-browser-extensions.sh")
 
             member_names = {m.name for m in tar.getmembers()}
             if "install-agent.sh" not in member_names:

@@ -146,6 +146,68 @@ export interface DashboardMetricsResponse {
   daily_activity: DailyActivityPoint[];
 }
 
+export interface ReportNamedCount {
+  name: string;
+  count: number;
+}
+
+export interface ReportDailyPoint {
+  date: string;
+  total: number;
+  prompts: number;
+  blocks: number;
+  pii: number;
+  threats: number;
+  policy_violations: number;
+}
+
+export interface ReportFilterOptions {
+  event_types: string[];
+  providers: string[];
+  devices: string[];
+  entities: string[];
+}
+
+export interface ReportSummaryResponse {
+  days: number;
+  period_start: string;
+  period_end: string;
+  total_events: number;
+  prompts: number;
+  blocks: number;
+  pii_detections: number;
+  threats: number;
+  policy_violations: number;
+  prompt_blocked: number;
+  block_rate_pct: number;
+  pii_rate_pct: number;
+  security_score: number;
+  agents_total: number;
+  agents_online: number;
+  agents_offline: number;
+  agents_pending: number;
+  agents_revoked: number;
+  policies_active: number;
+  avg_daily_events: number;
+  peak_day: string | null;
+  peak_day_count: number;
+  daily_activity: ReportDailyPoint[];
+  by_event_type: ReportNamedCount[];
+  by_provider: ReportNamedCount[];
+  by_device: ReportNamedCount[];
+  by_entity: ReportNamedCount[];
+  by_source: ReportNamedCount[];
+  filter_options: ReportFilterOptions;
+}
+
+export interface ReportQuery {
+  days?: number;
+  event_type?: string;
+  provider?: string;
+  device?: string;
+  entity?: string;
+}
+
 export interface ThreatEventResponse {
   id: string;
   event_type: string;
@@ -153,6 +215,8 @@ export interface ThreatEventResponse {
   masked_content: string;
   original_content: string | null;
   metadata: Record<string, unknown>;
+  pii_entities: string[];
+  pii_hit_count: number;
   created_at: string;
   agent_id: string | null;
   hostname: string | null;
