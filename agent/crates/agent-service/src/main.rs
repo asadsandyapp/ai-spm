@@ -281,11 +281,19 @@ mod windows_svc {
     const SERVICE_NAME: &str = "AiSpmAgent";
     const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
+    // service_dispatcher::start needs an `extern "system"` FFI callback, not a
+    // plain Rust fn - this macro generates that wrapper (named ffi_service_main
+    // below) around service_main. Without it this is a type mismatch at compile
+    // time (E0308: expected "system" fn, found "Rust" fn) - caught by actually
+    // building with --features windows-service for the MSI, since the plain
+    // `cargo build --workspace` in agent-ci.yml's `test` job never enables it.
+    windows_service::define_windows_service!(ffi_service_main, service_main);
+
     pub fn run() -> windows_service::Result<()> {
         service_dispatcher::start(SERVICE_NAME, ffi_service_main)
     }
 
-    fn ffi_service_main(_arguments: Vec<OsString>) {
+    fn service_main(_arguments: Vec<OsString>) {
         if let Err(err) = run_service() {
             error!(error = %err, "windows service failed");
         }
