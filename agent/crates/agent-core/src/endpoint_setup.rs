@@ -212,12 +212,21 @@ fn nss_databases() -> Vec<PathBuf> {
         dbs.push(chrome_db);
     }
 
-    let firefox_root = home.join(".mozilla/firefox");
-    if let Ok(entries) = fs::read_dir(firefox_root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && (path.join("cert9.db").exists() || path.join("cert8.db").exists()) {
-                dbs.push(path);
+    // Ubuntu's `apt install firefox` installs the snap by default, which
+    // redirects $HOME to `~/snap/firefox/common` for its own profile
+    // storage - a plain classic/.deb Firefox still uses `.mozilla/firefox`
+    // directly, so both are checked.
+    let firefox_roots = [
+        home.join(".mozilla/firefox"),
+        home.join("snap/firefox/common/.mozilla/firefox"),
+    ];
+    for firefox_root in firefox_roots {
+        if let Ok(entries) = fs::read_dir(firefox_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && (path.join("cert9.db").exists() || path.join("cert8.db").exists()) {
+                    dbs.push(path);
+                }
             }
         }
     }

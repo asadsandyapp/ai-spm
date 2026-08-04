@@ -307,13 +307,10 @@ impl Config {
 
     /// Directory for the MITM root CA and dynamically issued leaf certificates.
     pub fn mitm_ca_dir(&self) -> std::path::PathBuf {
-        if let Some(ref path) = self.mitm_ca_dir {
-            return std::path::PathBuf::from(path);
-        }
-        if let Ok(home) = env::var("HOME") {
-            return std::path::PathBuf::from(home).join(".local/share/ai-spm/mitm");
-        }
-        std::path::PathBuf::from(DEFAULT_MITM_CA_DIR)
+        self.mitm_ca_dir
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_MITM_CA_DIR))
     }
 
     pub fn with_agent_id(mut self, agent_id: Uuid) -> Self {
