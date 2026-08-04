@@ -71,3 +71,73 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --verbose
+
+  # Goes beyond `test` above: builds the real agent-service binary and runs
+  # it against the real AI-SPM backend stack (deploy/docker-compose.yml) -
+  # actual registration (org token + mTLS cert issuance), a live heartbeat,
+  # a PII-bearing prompt through the agent's own local_api, and confirming
+  # the masked (never raw) event lands in the backend's audit log. This is
+  # the same flow validated by hand before; running it on every agent/**
+  # change means a change that breaks the agent<->backend contract (e.g. a
+  # response shape drift, a masking regression, a duplicate-fleet-entry
+  # bug on reinstall) fails CI instead of surfacing after release. See
+  # agent/scripts/e2e-smoke-test.py for what's actually asserted.
+  #
+  # Only needs ubuntu-latest - this validates the agent<->backend contract,
+  # which isn't platform-specific (the `test` job above already covers
+  # Windows build/unit-test separately).
+  e2e-against-backend:
+    name: E2E smoke test against live backend
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build tools for BoringSSL (clang, cmake, go)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang libclang-dev cmake golang-go
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+
+      - name: Build agent-service
+        working-directory: agent
+        run: cargo build -p agent-service --verbose
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Bring up the AI-SPM backend (postgres, redis, api, kong)
+        # Deliberately excludes dashboard/prometheus/grafana/minio - not
+        # needed for this contract test and only adds build/startup time.
+        # --wait blocks until each service's healthcheck passes (api,
+        # postgres, redis have one); the smoke test itself also polls
+        # /health before doing anything, as a second line of defense since
+        # Kong has no healthcheck block in this compose file.
+        run: >
+          docker compose -f deploy/docker-compose.yml up -d --build
+          --wait --wait-timeout 180 postgres redis api kong
+
+      - name: Run end-to-end smoke test against the real backend
+        run: |
+          python3 agent/scripts/e2e-smoke-test.py \
+            --agent-service agent/target/debug/agent-service \
+            --gateway-url http://localhost:8090
+
+      - name: Backend logs (on failure, for debugging)
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs api kong
+
+      - name: Tear down the backend stack
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v

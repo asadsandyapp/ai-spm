@@ -6,11 +6,25 @@ Lightweight endpoint agent for the AI-SPM platform. Intercepts AI provider traff
 
 ## CI
 
-`.github/workflows/agent-ci.yml` builds and tests this workspace on both
-`windows-latest` and `ubuntu-latest` on every push/PR to `proxy` that
-touches `agent/**`. Installs the system deps the BoringSSL-based TLS stack
-(`boring`/`tokio-boring`/`hyper-boring`) needs to build from source
-(`libclang` for bindgen, `cmake`, `go`, `nasm`).
+`.github/workflows/agent-ci.yml` runs on every push/PR to `proxy` that
+touches `agent/**`, two jobs deep:
+
+1. **`test`** — builds and unit-tests this workspace on both
+   `windows-latest` and `ubuntu-latest`. Installs the system deps the
+   BoringSSL-based TLS stack (`boring`/`tokio-boring`/`hyper-boring`) needs
+   to build from source (`libclang` for bindgen, `cmake`, `go`, `nasm`).
+2. **`e2e-against-backend`** (`needs: test`, `ubuntu-latest` only) — brings
+   up the real AI-SPM backend (`deploy/docker-compose.yml`: postgres,
+   redis, api, kong) and runs the actual built `agent-service` binary
+   against it: registration with a real org token + mTLS cert issuance, a
+   live heartbeat, a PII-bearing prompt through the agent's own
+   `local_api`, confirms the masked (never raw) event lands in the
+   backend's audit log, then restarts the binary and confirms
+   re-registration doesn't create a duplicate fleet entry. See
+   [`scripts/e2e-smoke-test.py`](scripts/e2e-smoke-test.py) for exactly
+   what's asserted — this is the same manual flow that used to be
+   validated by hand before a release, now gated on every `agent/**`
+   change instead of relying on someone remembering to run it.
 
 ## Workspace Crates
 
