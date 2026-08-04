@@ -9,9 +9,10 @@ use agent_core::endpoint_setup::configure_endpoint;
 use agent_core::heartbeat::run_heartbeat_loop;
 use agent_core::local_api::run_local_api;
 use agent_core::proxy::{build_proxy_state, run_explicit_proxy, run_transparent_proxy};
-use agent_core::{ensure_crypto_provider, Config, GatewayClient};
+use agent_core::{ensure_crypto_provider, AgentStatus, Config, GatewayClient};
 use thiserror::Error;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -47,7 +48,16 @@ fn init_logging() {
     }
 }
 
-async fn run_agent() -> Result<(), ServiceError> {
+/// Builds the gateway client, registers (with background retry), starts every
+/// enabled listener + heartbeat, and returns their join handles. Shared by the
+/// plain (Linux/ctrl-c) entrypoint and the Windows SCM entrypoint so the two
+/// platforms can't drift apart on registration retry / CA-failure fallback
+/// behavior, the way they previously did (Windows silently dropped
+/// registration errors and hard-failed on MITM CA setup instead of falling
+/// back to local_api-only like Linux does).
+async fn start_agent_tasks(
+    shutdown_rx: watch::Receiver<bool>,
+) -> Result<Vec<JoinHandle<()>>, ServiceError> {
     // Must run before GatewayClient / any rustls use (reqwest may also pull aws-lc).
     ensure_crypto_provider();
 
@@ -65,7 +75,7 @@ async fn run_agent() -> Result<(), ServiceError> {
     }
 
     let gateway = Arc::new(GatewayClient::new(&config)?);
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let status = AgentStatus::shared();
 
     if gateway.agent_id().is_none() {
         info!("agent not registered — calling POST /agent/v1/register");
@@ -119,6 +129,7 @@ async fn run_agent() -> Result<(), ServiceError> {
             Arc::clone(&gateway),
             config.mitm_ca_dir(),
             config.mitm_domains.clone(),
+            Arc::clone(&status),
         ) {
             Ok(state) => Some(state),
             Err(err) => {
@@ -197,15 +208,26 @@ async fn run_agent() -> Result<(), ServiceError> {
             "starting local API (web-audit bridge on 127.0.0.1)"
         );
         let local_api_gateway = Arc::clone(&gateway);
+        let local_api_status = Arc::clone(&status);
         let local_api_listen = config.local_api_listen;
         let local_api_shutdown = shutdown_rx.clone();
         handles.push(tokio::spawn(async move {
-            if let Err(err) =
-                run_local_api(local_api_listen, local_api_gateway, local_api_shutdown).await
+            if let Err(err) = run_local_api(
+                local_api_listen,
+                local_api_gateway,
+                local_api_status,
+                local_api_shutdown,
+            )
+            .await
             {
                 error!(error = %err, "local inspection API exited with error");
             }
         }));
+    } else {
+        warn!(
+            listen = %config.local_api_listen,
+            "local API not started — agent-tray's GET /status will be unreachable until AISPM_LOCAL_API_ENABLED=1 or transparent mode is on"
+        );
     }
 
     if !config.transparent_enabled && !config.explicit_proxy_enabled && !config.local_api_enabled {
@@ -213,13 +235,23 @@ async fn run_agent() -> Result<(), ServiceError> {
     }
 
     let heartbeat_gateway = Arc::clone(&gateway);
+    let heartbeat_status = Arc::clone(&status);
     let heartbeat_shutdown = shutdown_rx.clone();
     let heartbeat_handle = tokio::spawn(async move {
-        if let Err(err) = run_heartbeat_loop(heartbeat_gateway, heartbeat_shutdown).await {
+        if let Err(err) =
+            run_heartbeat_loop(heartbeat_gateway, heartbeat_status, heartbeat_shutdown).await
+        {
             error!(error = %err, "heartbeat loop exited with error");
         }
     });
     handles.push(heartbeat_handle);
+
+    Ok(handles)
+}
+
+async fn run_agent() -> Result<(), ServiceError> {
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let handles = start_agent_tasks(shutdown_rx).await?;
 
     tokio::signal::ctrl_c()
         .await
@@ -314,52 +346,15 @@ mod windows_svc {
     }
 
     async fn run_agent_with_shutdown(
-        shutdown_rx: watch::Receiver<bool>,
+        mut shutdown_rx: watch::Receiver<bool>,
     ) -> Result<(), ServiceError> {
-        // Windows SCM path mirrors Linux run_agent with external shutdown signal.
-        let config = Config::load()?;
-        if let Err(err) = configure_endpoint(&config) {
-            error!(error = %err, "endpoint auto-configuration failed; proxy will still start");
-        }
-        let gateway = Arc::new(GatewayClient::new(&config)?);
-        if gateway.agent_id().is_none() {
-            let _ = gateway.register().await;
-        }
-        let (shutdown_tx, internal_shutdown) = watch::channel(false);
-        let proxy_state = build_proxy_state(
-            Arc::clone(&gateway),
-            config.mitm_ca_dir(),
-            config.mitm_domains.clone(),
-        )?;
+        // Windows SCM path shares start_agent_tasks with the Linux/ctrl-c path so
+        // registration retry-with-backoff and the MITM-CA-failure→local_api-only
+        // fallback behave identically on both platforms instead of Windows
+        // silently dropping registration errors and hard-failing on CA setup.
+        let handles = start_agent_tasks(shutdown_rx.clone()).await?;
 
-        let mut handles = Vec::new();
-        if config.transparent_enabled {
-            handles.push(tokio::spawn(run_transparent_proxy(
-                config.transparent_listen,
-                Arc::clone(&proxy_state),
-                config.socket_mark,
-                internal_shutdown.clone(),
-            )));
-        }
-        if config.explicit_proxy_enabled {
-            handles.push(tokio::spawn(run_explicit_proxy(
-                config.proxy_listen,
-                proxy_state,
-                internal_shutdown.clone(),
-            )));
-        }
-        if config.local_api_enabled || config.transparent_enabled {
-            handles.push(tokio::spawn(run_local_api(
-                config.local_api_listen,
-                Arc::clone(&gateway),
-                internal_shutdown.clone(),
-            )));
-        }
-        handles.push(tokio::spawn(run_heartbeat_loop(gateway, internal_shutdown)));
-
-        let mut shutdown_rx = shutdown_rx;
         shutdown_rx.changed().await.ok();
-        let _ = shutdown_tx.send(true);
         for handle in handles {
             let _ = handle.await;
         }

@@ -77,29 +77,48 @@ agent/installer/wix/
 
 ## Windows Service Component
 
-Register the agent as `AiSpmAgent` (matches the `windows-service` feature in `agent-service`):
+Register the agent as `AiSpmAgent` (matches the `windows-service` feature in `agent-service`).
+
+Include the WiX Util extension's `<util:ServiceConfig>` so a crashed agent restarts
+under SCM the same way the Linux systemd unit's `Restart=on-failure` does (see
+[`deploy/systemd/aispm-agent.service`](../../../deploy/systemd/aispm-agent.service)) —
+without this, a Windows crash leaves the endpoint unprotected until someone notices:
 
 ```xml
-<Component Id="AgentWindowsService" Directory="AgentDir" Guid="PUT-GUID-HERE">
-  <File Id="AgentServiceExeFile" Source="..\..\target\release\agent-service.exe" KeyPath="yes" />
-  <ServiceInstall
-    Id="AgentServiceInstall"
-    Name="AiSpmAgent"
-    DisplayName="AI-SPM Endpoint Agent"
-    Description="Intercepts AI provider traffic and forwards prompts through the AI-SPM gateway."
-    Type="ownProcess"
-    Start="auto"
-    Account="LocalSystem"
-    ErrorControl="normal" />
-  <ServiceControl
-    Id="AgentServiceControl"
-    Name="AiSpmAgent"
-    Start="install"
-    Stop="both"
-    Remove="uninstall"
-    Wait="yes" />
-</Component>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  ...
+  <Component Id="AgentWindowsService" Directory="AgentDir" Guid="PUT-GUID-HERE">
+    <File Id="AgentServiceExeFile" Source="..\..\target\release\agent-service.exe" KeyPath="yes" />
+    <ServiceInstall
+      Id="AgentServiceInstall"
+      Name="AiSpmAgent"
+      DisplayName="AI-SPM Endpoint Agent"
+      Description="Intercepts AI provider traffic and forwards prompts through the AI-SPM gateway."
+      Type="ownProcess"
+      Start="auto"
+      Account="LocalSystem"
+      ErrorControl="normal">
+      <util:ServiceConfig
+        FirstFailureActionType="restart"
+        SecondFailureActionType="restart"
+        ThirdFailureActionType="restart"
+        RestartServiceDelayInSeconds="30"
+        ResetPeriodInDays="1" />
+    </ServiceInstall>
+    <ServiceControl
+      Id="AgentServiceControl"
+      Name="AiSpmAgent"
+      Start="install"
+      Stop="both"
+      Remove="uninstall"
+      Wait="yes" />
+  </Component>
+</Wix>
 ```
+
+Requires the WiX Util extension: `wix extension add WixToolset.Util.wixext` (v4+),
+or `-ext WixUtilExtension` on the `candle`/`light` command line for WiX v3.
 
 ## Environment Configuration
 
@@ -123,14 +142,14 @@ With WiX v4 CLI:
 
 ```powershell
 cd agent\installer\wix
-wix build Product.wxs Files.wxs Service.wxs -o aispm-agent.msi
+wix build Product.wxs Files.wxs Service.wxs -ext WixToolset.Util.wixext -o aispm-agent.msi
 ```
 
 For WiX v3 (legacy):
 
 ```powershell
 candle Product.wxs Files.wxs Service.wxs
-light -out aispm-agent.msi Product.wixobj Files.wixobj Service.wixobj
+light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj Files.wixobj Service.wixobj
 ```
 
 ## Signing (Production)
@@ -145,8 +164,10 @@ signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 aispm-a
 
 1. Install: `msiexec /i aispm-agent.msi /l*v install.log`
 2. Confirm service: `sc query AiSpmAgent`
-3. Check logs: Event Viewer → Application, or run with `AISPM_LOG_JSON=false` for console debugging
-4. Uninstall: `msiexec /x aispm-agent.msi`
+3. Confirm recovery config took effect: `sc qfailure AiSpmAgent` should list `RESTART` actions with a 30000ms delay
+4. Kill the process (`taskkill /f /im agent-service.exe`) and confirm SCM restarts it (`sc query AiSpmAgent` shows a new PID) — mirrors the real-hardware verification already done for the Linux/rust DLP agent's systemd unit, do the same here rather than trusting the WiX markup alone
+5. Check logs: Event Viewer → Application, or run with `AISPM_LOG_JSON=false` for console debugging
+6. Uninstall: `msiexec /x aispm-agent.msi`
 
 ## Upgrade Notes
 
