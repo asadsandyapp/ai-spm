@@ -33,6 +33,11 @@ jobs:
   test:
     name: Build & test
     strategy:
+      # Without this, one OS leg failing cancels the other mid-run (default
+      # fail-fast: true) - which looks like an unrelated "operation was
+      # canceled" on the survivor instead of showing its own real result,
+      # and hides whether the surviving OS would even have passed.
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -60,6 +65,22 @@ jobs:
       - name: Install build tools for BoringSSL (clang, cmake, go)
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang libclang-dev cmake golang-go
+
+      - name: Install Tauri's Linux prerequisites (agent-tray)
+        # agent-tray links GTK/GLib via the tray-icon crate regardless of
+        # window count (Tauri's Linux backend runs on GTK's event loop even
+        # for a tray-only app with zero windows) - `cargo build --workspace`
+        # below builds every member including agent-tray, so this needs to
+        # be here, not just wherever agent-tray is built directly. Package
+        # list matches Tauri v2's documented Debian/Ubuntu prerequisites.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
