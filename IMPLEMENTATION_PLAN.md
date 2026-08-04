@@ -84,6 +84,55 @@
 | P2-11 | Quota enforcement (agents, prompts/day) | 429 when plan limit hit |
 | P2-12 | PII + policy + auth integration tests | Full matrix in CI |
 
+### P2-04 detail — Kong mTLS client-cert termination (scoped, not started)
+
+Current state: the agent already presents a client cert via rustls
+(`agent/crates/agent-core/src/gateway/client.rs`), and the backend has a
+SAN→org_id extractor (`backend/src/ai_spm/tenant/middleware.py`,
+`_extract_org_from_spiffe_san`) — but its own docstring says so: nothing in
+this deployment terminates/verifies the client cert yet, so that header is
+never actually set and the extractor is dead code. Real `/agent/v1/*` auth
+today is the bearer session token (`_verify_agent_session_token`), which is a
+legitimate secret-based check on its own — this task is about adding cert-SAN
+as a second, independent factor (defense in depth), not about a hole in
+current auth.
+
+This is infra + config work, not a quick code patch — flagging it as its own
+task rather than folding it into agent-tray/Windows-Service work:
+
+1. **Pick the termination approach.** Kong OSS has no built-in "verify
+   client cert → header" plugin (that's Kong Enterprise's `mtls-auth`).
+   Options:
+   - Kong Enterprise `mtls-auth` plugin (licensing cost, least custom code)
+   - Nginx-level `ssl_client_certificate` + `ssl_verify_client on` via Kong's
+     custom Nginx template/injected directives, forwarding the verified DN/SAN
+     as a header Kong OSS can pass through
+   - A small custom Kong plugin (Lua) that reads the Nginx-verified cert
+     variables and sets `X-Client-Cert-SAN` — the header the backend already
+     expects
+2. **Cert distribution.** Kong needs the AI-SPM CA (or a dedicated client-auth
+   CA) configured as the trusted client-cert issuer; agents already receive
+   their cert/key from `/agent/v1/register` (`GatewayClient::save_registration_certs`),
+   so this is mostly Kong-side config, not agent code.
+3. **Header trust boundary.** Once Kong sets `X-Client-Cert-SAN` only after
+   verifying the cert, the backend must also confirm the request actually
+   came through Kong (not a direct hit on the FastAPI container) — otherwise
+   the header becomes spoofable exactly where it matters. Check whether the
+   backend is already unreachable except via Kong in every deployment target
+   (Compose, K8s) before trusting the header as-is.
+4. **Testing.** Local Compose stack: real cert-bound agent registration →
+   confirm requests without a valid client cert are rejected at Kong (never
+   reach FastAPI), and requests with a valid cert populate `TenantContext`
+   with `auth_source="mtls"`.
+5. **Decide whether this replaces or supplements the session-token check.**
+   Given the token check is already solid, the likely right answer is
+   "supplements" (both must pass) rather than a risky swap — needs an
+   explicit product decision, not an implicit code change.
+
+No code changed for this item in this pass — deliberately scoped as a
+follow-up rather than implemented, since it requires Kong infrastructure
+decisions outside `agent/`'s Rust code.
+
 ---
 
 ## Phase 3: Dashboard + Platform Admin + Billing (Weeks 9–12)
