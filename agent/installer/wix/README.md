@@ -1,124 +1,50 @@
 # WiX MSI Installer (Windows)
 
-Build a Windows MSI package for the AI-SPM endpoint agent using [WiX Toolset v4+](https://wixtoolset.org/).
+Real WiX Toolset **v3** source (not a hypothetical example) for the Windows
+MSI packaging `agent-service.exe` (as the `AiSpmAgent` Windows Service) and
+`agent-tray.exe` (autostarted per-machine). Built and verified locally with
+WiX Toolset v3.14 (`candle`/`light`); verified end-to-end (install, service
+running, recovery config, tray autostart key, kill-and-confirm-restart,
+uninstall, clean removal) by `.github/workflows/agent-ci.yml`'s
+`installer-test-windows` job, which runs on every `agent/**` change.
 
 ## Prerequisites
 
 - Windows 10/11 or Windows Server 2019+
 - [Rust](https://rustup.rs/) with the MSVC toolchain
-- [WiX Toolset](https://wixtoolset.org/docs/intro/) (`wix` CLI on PATH)
+- [WiX Toolset v3](https://wixtoolset.org/docs/wix3/) (`candle`/`light` on PATH — `choco install wixtoolset`)
 - Visual Studio Build Tools (C++ workload)
 
-## Build the Agent Binary
+## Build the binaries
 
 From the `agent/` workspace root:
 
 ```powershell
 cd agent
-cargo build -p agent-service --release --features windows-service
+cargo build --release -p agent-service --features windows-service -p agent-tray
 ```
 
-The release binary is written to:
+Produces `target\release\agent-service.exe` and `target\release\agent-tray.exe`,
+both referenced by `Product.wxs` via relative paths.
 
-```text
-target\release\agent-service.exe
-```
+## What `Product.wxs` packages
 
-## Directory Layout
+- **`AgentServiceComponent`** — installs `agent-service.exe` and registers it
+  as the `AiSpmAgent` Windows Service (`LocalSystem`, auto-start), with a
+  `util:ServiceConfig` crash-recovery block (restart on failure, 30s delay)
+  matching the Linux systemd unit's `Restart=on-failure` (see
+  [`deploy/systemd/aispm-agent.service`](../../../deploy/systemd/aispm-agent.service)) —
+  without this, a Windows crash leaves the endpoint unprotected until someone
+  notices.
+- **`AgentTrayComponent`** — installs `agent-tray.exe` and adds an
+  `HKLM\Software\Microsoft\Windows\CurrentVersion\Run` autostart entry, so
+  whoever's logged in sees the Protected/Disconnected/Blocked tray.
 
-Create the WiX source tree under `agent/installer/wix/`:
-
-```text
-agent/installer/wix/
-├── README.md
-├── Product.wxs          # Product definition (upgrade code, version, features)
-├── Files.wxs            # Harvested or explicit file components
-├── Service.wxs          # Windows Service (AiSpmAgent) install/remove
-└── agent.wixproj        # WiX project file (optional, for MSBuild)
-```
-
-## Example `Product.wxs`
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package
-    Name="AI-SPM Endpoint Agent"
-    Manufacturer="AI-SPM Platform"
-    Version="0.1.0.0"
-    UpgradeCode="PUT-GUID-HERE"
-    Scope="perMachine">
-
-    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
-    <MediaTemplate EmbedCab="yes" />
-
-    <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLDIR" Name="AISPM">
-        <Directory Id="AgentDir" Name="Agent" />
-      </Directory>
-    </StandardDirectory>
-
-    <StandardDirectory Id="CommonAppDataFolder">
-      <Directory Id="CertDir" Name="AISPM\certs" />
-    </StandardDirectory>
-
-    <ComponentGroup Id="AgentComponents" Directory="AgentDir">
-      <Component Id="AgentServiceExe" Guid="PUT-GUID-HERE">
-        <File Source="..\..\target\release\agent-service.exe" KeyPath="yes" />
-      </Component>
-    </ComponentGroup>
-
-    <Feature Id="MainFeature" Title="AI-SPM Agent" Level="1">
-      <ComponentGroupRef Id="AgentComponents" />
-    </Feature>
-  </Package>
-</Wix>
-```
-
-## Windows Service Component
-
-Register the agent as `AiSpmAgent` (matches the `windows-service` feature in `agent-service`).
-
-Include the WiX Util extension's `<util:ServiceConfig>` so a crashed agent restarts
-under SCM the same way the Linux systemd unit's `Restart=on-failure` does (see
-[`deploy/systemd/aispm-agent.service`](../../../deploy/systemd/aispm-agent.service)) —
-without this, a Windows crash leaves the endpoint unprotected until someone notices:
-
-```xml
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  ...
-  <Component Id="AgentWindowsService" Directory="AgentDir" Guid="PUT-GUID-HERE">
-    <File Id="AgentServiceExeFile" Source="..\..\target\release\agent-service.exe" KeyPath="yes" />
-    <ServiceInstall
-      Id="AgentServiceInstall"
-      Name="AiSpmAgent"
-      DisplayName="AI-SPM Endpoint Agent"
-      Description="Intercepts AI provider traffic and forwards prompts through the AI-SPM gateway."
-      Type="ownProcess"
-      Start="auto"
-      Account="LocalSystem"
-      ErrorControl="normal">
-      <util:ServiceConfig
-        FirstFailureActionType="restart"
-        SecondFailureActionType="restart"
-        ThirdFailureActionType="restart"
-        RestartServiceDelayInSeconds="30"
-        ResetPeriodInDays="1" />
-    </ServiceInstall>
-    <ServiceControl
-      Id="AgentServiceControl"
-      Name="AiSpmAgent"
-      Start="install"
-      Stop="both"
-      Remove="uninstall"
-      Wait="yes" />
-  </Component>
-</Wix>
-```
-
-Requires the WiX Util extension: `wix extension add WixToolset.Util.wixext` (v4+),
-or `-ext WixUtilExtension` on the `candle`/`light` command line for WiX v3.
+`UpgradeCode` (`93E7E455-EFF2-4918-BC74-418C39F7C710`) must stay constant
+across every future version — `MajorUpgrade` depends on it to detect and
+replace prior installs. Component GUIDs are fixed (not `*`), since Windows
+Installer needs stable component identity across upgrades, particularly for
+the `ServiceInstall`-bearing component.
 
 ## Environment Configuration
 
@@ -136,21 +62,22 @@ AISPM_LOG_JSON=true
 
 On first launch, registration writes client certificates to these paths automatically.
 
-## Build the MSI
+A Windows Service does **not** inherit an interactive session's environment
+variables — it reads the machine environment block from the registry at
+process creation. Set these as **machine**-scope (`setx /M` or
+`[Environment]::SetEnvironmentVariable(name, value, "Machine")`), not just
+for your own user.
 
-With WiX v4 CLI:
+## Build the MSI
 
 ```powershell
 cd agent\installer\wix
-wix build Product.wxs Files.wxs Service.wxs -ext WixToolset.Util.wixext -o aispm-agent.msi
+candle -ext WixUtilExtension Product.wxs
+light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj
 ```
 
-For WiX v3 (legacy):
-
-```powershell
-candle Product.wxs Files.wxs Service.wxs
-light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj Files.wixobj Service.wixobj
-```
+Both binary paths default to `..\..\target\release\<name>.exe`; override with
+`candle -dAgentServiceExe=<path> -dAgentTrayExe=<path> Product.wxs` if you built elsewhere.
 
 ## Signing (Production)
 
@@ -162,15 +89,25 @@ signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 aispm-a
 
 ## Verification
 
-1. Install: `msiexec /i aispm-agent.msi /l*v install.log`
-2. Confirm service: `sc query AiSpmAgent`
+1. Install (needs an elevated/admin shell — a per-machine service install
+   fails with Windows Installer error 1925 otherwise):
+   `msiexec /i aispm-agent.msi /quiet /l*v install.log`
+2. Confirm service: `sc query AiSpmAgent` → `RUNNING`
 3. Confirm recovery config took effect: `sc qfailure AiSpmAgent` should list `RESTART` actions with a 30000ms delay
-4. Kill the process (`taskkill /f /im agent-service.exe`) and confirm SCM restarts it (`sc query AiSpmAgent` shows a new PID) — mirrors the real-hardware verification already done for the Linux/rust DLP agent's systemd unit, do the same here rather than trusting the WiX markup alone
-5. Check logs: Event Viewer → Application, or run with `AISPM_LOG_JSON=false` for console debugging
-6. Uninstall: `msiexec /x aispm-agent.msi`
+4. Confirm tray autostart: `Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name AiSpmAgentTray`
+5. Kill the process (`Stop-Process -Name agent-service -Force`) and confirm SCM actually restarts it with a **new PID** (`Get-Process agent-service`) — don't just trust the WiX markup; this is exactly the class of thing that looks configured but isn't (see `.github/workflows/agent-ci.yml`'s `installer-test-windows` job, which asserts on the PID change, not just service status)
+6. Check logs: Event Viewer → Application, or run with `AISPM_LOG_JSON=false` for console debugging
+7. Uninstall: `msiexec /x aispm-agent.msi /quiet`
+8. Confirm clean removal: service, registry key, and `C:\Program Files\AISPM` are all gone
 
 ## Upgrade Notes
 
 - Bump `Version` in `Product.wxs` for each release.
 - Keep `UpgradeCode` constant across versions of the same product line.
 - Use `MajorUpgrade` to replace in-place installs.
+
+## Not yet done
+
+- MSI is unsigned (see Signing above — needs a real code-signing cert, not scripted here).
+- No Start Menu shortcut or uninstall entry beyond what MSI provides by default.
+- Tray autostart is machine-wide (HKLM); there's no per-user opt-out.

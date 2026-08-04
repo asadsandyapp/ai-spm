@@ -7,12 +7,18 @@ Lightweight endpoint agent for the AI-SPM platform. Intercepts AI provider traff
 ## CI
 
 `.github/workflows/agent-ci.yml` runs on every push/PR to `proxy` that
-touches `agent/**`, two jobs deep:
+touches `agent/**`, three jobs deep:
 
 1. **`test`** — builds and unit-tests this workspace on both
    `windows-latest` and `ubuntu-latest`. Installs the system deps the
    BoringSSL-based TLS stack (`boring`/`tokio-boring`/`hyper-boring`) needs
    to build from source (`libclang` for bindgen, `cmake`, `go`, `nasm`).
+   On Windows, also builds `agent-service` with `--features windows-service`
+   specifically — the plain workspace build never enables optional
+   features, which is exactly how a real compile error in that path
+   (`service_dispatcher::start` called without the required
+   `define_windows_service!` FFI wrapper) went undetected until someone
+   built a release MSI by hand.
 2. **`e2e-against-backend`** (`needs: test`, `ubuntu-latest` only) — brings
    up the real AI-SPM backend (`deploy/docker-compose.yml`: postgres,
    redis, api, kong) and runs the actual built `agent-service` binary
@@ -25,6 +31,15 @@ touches `agent/**`, two jobs deep:
    what's asserted — this is the same manual flow that used to be
    validated by hand before a release, now gated on every `agent/**`
    change instead of relying on someone remembering to run it.
+3. **`installer-test-windows`** (no `needs:` — runs in parallel with
+   `test`, same reasoning as rust-ci.yml's installer jobs: a flake here
+   shouldn't block the fast unit-test feedback loop) — builds the real
+   Windows MSI ([`installer/wix/Product.wxs`](installer/wix/Product.wxs)),
+   installs it for real, confirms the service is running, confirms the
+   crash-recovery config actually works (kills the process and asserts SCM
+   restarts it with a **new PID**, not just that the config exists),
+   confirms the tray autostart registry key, then uninstalls and confirms
+   clean removal.
 
 ## Workspace Crates
 

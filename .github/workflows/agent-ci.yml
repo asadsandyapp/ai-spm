@@ -69,6 +69,16 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace --verbose
 
+      - name: Build agent-service with the windows-service feature
+        # `cargo build --workspace` above never enables optional features, so
+        # this path was silently never compiled by CI - which is exactly how
+        # a real bug (service_dispatcher::start called without the required
+        # define_windows_service! FFI wrapper, a straight type-mismatch
+        # compile error) sat undetected until someone built a release MSI by
+        # hand. Windows-only since the feature is windows-only.
+        if: runner.os == 'Windows'
+        run: cargo build -p agent-service --features windows-service --verbose
+
       - name: Run tests
         run: cargo test --workspace --verbose
 
@@ -141,3 +151,123 @@ jobs:
       - name: Tear down the backend stack
         if: always()
         run: docker compose -f deploy/docker-compose.yml down -v
+
+  # Builds the real MSI (agent/installer/wix/Product.wxs) and actually
+  # installs/uninstalls it - the same verification that couldn't be
+  # completed by hand during development (that shell ran under UAC's
+  # filtered non-admin token; GitHub's windows-latest runner has no such
+  # restriction). Not part of the `test` matrix and deliberately has no
+  # `needs:` - installing a service system-wide is heavier and more
+  # failure-prone than a plain cargo build, so a flake here shouldn't block
+  # the fast unit-test feedback loop (mirrors rust-ci.yml's
+  # installer-test-windows for the same reason).
+  installer-test-windows:
+    name: Installer smoke test (Windows MSI)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NASM
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install LLVM/libclang
+        run: choco install llvm -y --no-progress
+
+      - name: Install WiX Toolset v3
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+
+      - name: Build agent-service (release, windows-service feature) and agent-tray (release)
+        working-directory: agent
+        run: cargo build --release -p agent-service --features windows-service -p agent-tray --verbose
+
+      - name: Build the MSI
+        working-directory: agent/installer/wix
+        run: |
+          candle -ext WixUtilExtension Product.wxs
+          light -ext WixUtilExtension -out aispm-agent.msi Product.wixobj
+
+      - name: Set machine-wide env vars so the service has a valid (if unreachable) config
+        # A Windows Service doesn't inherit this step's process env - it
+        # reads the machine environment block from the registry at process
+        # creation. Values only need to satisfy Config::load()'s two
+        # required fields (org token/id); the gateway URL is deliberately
+        # unreachable - registration is expected to fail and retry in the
+        # background (see start_agent_tasks in agent-service/src/main.rs),
+        # not fatal to the service itself.
+        run: |
+          [Environment]::SetEnvironmentVariable("AISPM_GATEWAY_URL", "http://127.0.0.1:1", "Machine")
+          [Environment]::SetEnvironmentVariable("AISPM_ORG_TOKEN", "ci-installer-test-token-32-chars-minimum", "Machine")
+          [Environment]::SetEnvironmentVariable("AISPM_ORG_ID", "00000000-0000-0000-0000-000000000001", "Machine")
+          [Environment]::SetEnvironmentVariable("AISPM_LOG_JSON", "false", "Machine")
+
+      - name: Install the MSI
+        working-directory: agent/installer/wix
+        run: |
+          $proc = Start-Process msiexec.exe -ArgumentList "/i `"aispm-agent.msi`" /quiet /norestart /l*v install.log" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Get-Content install.log -Tail 60
+            throw "msiexec install failed with exit code $($proc.ExitCode)"
+          }
+
+      - name: Verify the service is registered and running
+        run: |
+          Start-Sleep -Seconds 3
+          $svc = Get-Service -Name AiSpmAgent -ErrorAction Stop
+          if ($svc.Status -ne 'Running') { throw "service status is $($svc.Status), expected Running" }
+
+      - name: Verify the crash-recovery config was actually applied
+        run: |
+          $out = sc.exe qfailure AiSpmAgent
+          $out
+          if (-not ($out -match "RESTART")) { throw "no RESTART action found in sc qfailure output" }
+
+      - name: Verify the tray autostart registry key
+        run: |
+          $val = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name AiSpmAgentTray -ErrorAction Stop
+          if ($val.AiSpmAgentTray -notmatch "agent-tray.exe") { throw "unexpected tray autostart value: $($val.AiSpmAgentTray)" }
+
+      - name: Kill the service process and confirm SCM actually restarts it
+        # The real test of the recovery config, not just that it's
+        # configured - matches the manual verification the DLP agent (rust/)
+        # already did for its own service (see rust/ROADMAP.md's Phase 0
+        # stability-hardening entry).
+        run: |
+          $before = (Get-Process -Name agent-service -ErrorAction Stop).Id
+          Stop-Process -Id $before -Force
+          Start-Sleep -Seconds 40
+          $after = Get-Process -Name agent-service -ErrorAction SilentlyContinue
+          if (-not $after) { throw "SCM did not restart agent-service after it was killed" }
+          if ($after.Id -eq $before) { throw "same PID after kill - process was never actually restarted" }
+          $svc = Get-Service -Name AiSpmAgent
+          if ($svc.Status -ne 'Running') { throw "service status after recovery is $($svc.Status), expected Running" }
+
+      - name: Uninstall the MSI
+        if: always()
+        working-directory: agent/installer/wix
+        run: |
+          $proc = Start-Process msiexec.exe -ArgumentList "/x `"aispm-agent.msi`" /quiet /norestart /l*v uninstall.log" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Get-Content uninstall.log -Tail 60
+            throw "msiexec uninstall failed with exit code $($proc.ExitCode)"
+          }
+
+      - name: Verify the service, tray key, and install dir were removed
+        if: always()
+        run: |
+          $svc = Get-Service -Name AiSpmAgent -ErrorAction SilentlyContinue
+          if ($svc) { throw "service AiSpmAgent is still present after uninstall" }
+          $val = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name AiSpmAgentTray -ErrorAction SilentlyContinue
+          if ($val) { throw "tray autostart registry key still present after uninstall" }
+          if (Test-Path "C:\Program Files\AISPM") { throw "install directory still present after uninstall" }
