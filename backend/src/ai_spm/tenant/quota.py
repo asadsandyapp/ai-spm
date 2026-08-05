@@ -5,13 +5,13 @@ import structlog
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
 from ai_spm.domain.models import Agent, Subscription, UsageDaily
 from ai_spm.infrastructure.db.session import get_db_session
-from ai_spm.tenant.context import get_tenant_context, require_tenant_context
-from ai_spm.tenant.rls import set_rls_context
+from ai_spm.tenant.context import get_tenant_context
 
 logger = structlog.get_logger(__name__)
 
@@ -67,28 +67,37 @@ async def check_prompt_quota(org_id: UUID) -> None:
 
 
 async def increment_prompt_usage(org_id: UUID) -> None:
+    """Atomic upsert - the previous select-then-write here was a lost-update
+    race: two concurrent calls could both read the same prompts_count before
+    either committed, so the second commit clobbered the first instead of
+    adding to it, letting an org exceed max_prompts_per_day by parallelizing
+    requests. A single INSERT ... ON CONFLICT DO UPDATE has no such window.
+    """
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     async with get_db_session(org_id) as session:
-        result = await session.execute(
-            select(UsageDaily).where(
-                UsageDaily.org_id == org_id, UsageDaily.usage_date == today
-            )
+        stmt = pg_insert(UsageDaily).values(
+            org_id=org_id, usage_date=today, prompts_count=1, active_agents=0
         )
-        usage = result.scalar_one_or_none()
-        if usage:
-            usage.prompts_count += 1
-        else:
-            session.add(
-                UsageDaily(org_id=org_id, usage_date=today, prompts_count=1, active_agents=0)
-            )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["org_id", "usage_date"],
+            set_={"prompts_count": UsageDaily.prompts_count + 1},
+        )
+        await session.execute(stmt)
         await session.commit()
+
+
+# /web-audit shares the prompt-per-day budget (both are usage
+# incremented via increment_prompt_usage) - it previously had no pre-check
+# at all, unlike /prompt, letting a caller flood audit events without ever
+# hitting a 429.
+RATE_LIMITED_AGENT_PATHS = frozenset({"/agent/v1/prompt", "/agent/v1/web-audit"})
 
 
 class QuotaMiddleware(BaseHTTPMiddleware):
     """Enforce per-tenant plan limits on prompt submissions."""
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if request.url.path == "/agent/v1/prompt" and request.method == "POST":
+        if request.url.path in RATE_LIMITED_AGENT_PATHS and request.method == "POST":
             ctx = get_tenant_context()
             if ctx:
                 try:

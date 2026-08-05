@@ -179,6 +179,12 @@ class Agent(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     cert_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Hash of the bearer token issued once at registration (see
+    # AgentService.register) and required on every /agent/v1/* call other
+    # than /register itself - closes the gap where X-Org-ID/X-Agent-ID
+    # headers alone were trusted with no secret. See
+    # tenant/middleware.py::_verify_agent_session_token.
+    session_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="agents")
 

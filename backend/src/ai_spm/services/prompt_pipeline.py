@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -12,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_spm.domain.enums import AgentStatus, AuditEventType, PolicyAction, PromptDecision
 from ai_spm.domain.models import Agent, AuditEvent
 from ai_spm.infrastructure.guardrails.adapter import GuardrailsAdapter
-import time
-
 from ai_spm.infrastructure.llm.openai_adapter import LLMProviderError, OpenAIAdapter
-from ai_spm.infrastructure.metrics import prompt_pipeline_duration, prompts_blocked_total, prompts_total
+from ai_spm.infrastructure.metrics import (
+    prompt_pipeline_duration,
+    prompts_blocked_total,
+    prompts_total,
+)
 from ai_spm.infrastructure.presidio.adapter import PresidioAdapter
 from ai_spm.services.policy_engine import PolicyEngine
 from ai_spm.services.severity import attach_severity
@@ -68,8 +71,13 @@ class PromptPipelineService:
         combined_text = " ".join(m.get("content", "") for m in messages)
 
         # Step 1-3: Policy evaluation (deny by default for blocked models/topics)
+        # Previously truncated to combined_text[:200] before the blocklist
+        # check, so padding a prompt past 200 chars silently defeated topic
+        # blocking. Safe to evaluate the full text now that
+        # MaxBodySizeMiddleware (tenant/middleware.py) bounds the overall
+        # request size - this substring check stays cheap regardless.
         allowed, policy_reason = await self.policy_engine.evaluate(
-            session, org_id, provider, model, topic=combined_text[:200]
+            session, org_id, provider, model, topic=combined_text
         )
         if not allowed:
             event = await self._create_audit(
@@ -192,7 +200,7 @@ class PromptPipelineService:
             response_content = await self._proxy_llm(
                 session, org_id, provider, model, masked_messages
             )
-        except PromptPipelineError as exc:
+        except PromptPipelineError:
             raise
         except Exception as exc:
             logger.error("llm_proxy_failed", error=str(exc))
@@ -312,12 +320,20 @@ class AgentService:
         org_token: str,
         org_token_hash: str,
         cert_fingerprint: str | None = None,
-    ) -> Agent | None:
-        from ai_spm.infrastructure.auth.password import hash_token
+    ) -> tuple[Agent, str] | None:
+        """Returns (agent, session_token) - the plaintext token is shown to
+        the caller exactly once, here, then only ever compared by hash (see
+        tenant/middleware.py::_verify_agent_session_token). A fresh token is
+        issued on every call, including idempotent re-registration, since
+        that's the only channel this token is ever handed out on."""
+        from ai_spm.infrastructure.auth.password import generate_token, hash_token
         from ai_spm.tenant.quota import QuotaExceededError, check_agent_quota
 
         if hash_token(org_token) != org_token_hash:
             return None
+
+        session_token = generate_token(48)
+        session_token_hash = hash_token(session_token)
 
         # Idempotent re-registration: reinstalling the agent on the same machine
         # (same org + hostname) must reuse the existing record instead of creating
@@ -336,11 +352,12 @@ class AgentService:
             existing.agent_version = agent_version
             existing.status = AgentStatus.ONLINE
             existing.last_heartbeat_at = datetime.now(UTC)
+            existing.session_token_hash = session_token_hash
             if cert_fingerprint:
                 existing.cert_fingerprint = cert_fingerprint
             await session.commit()
             await session.refresh(existing)
-            return existing
+            return existing, session_token
 
         try:
             await check_agent_quota(org_id)
@@ -355,11 +372,12 @@ class AgentService:
             status=AgentStatus.ONLINE,
             last_heartbeat_at=datetime.now(UTC),
             cert_fingerprint=cert_fingerprint,
+            session_token_hash=session_token_hash,
         )
         session.add(agent)
         await session.commit()
         await session.refresh(agent)
-        return agent
+        return agent, session_token
 
     async def heartbeat(self, session: AsyncSession, org_id: UUID, agent_id: UUID) -> str:
         """Return 'ok', 'revoked', or 'missing' so callers can respond precisely.

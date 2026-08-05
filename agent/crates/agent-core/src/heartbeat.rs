@@ -81,6 +81,7 @@ mod tests {
             org_token: "x".repeat(32),
             org_id: Uuid::new_v4(),
             agent_id,
+            session_token: agent_id.map(|_| "y".repeat(48)),
             proxy_listen: "127.0.0.1:0".parse().unwrap(),
             mtls_cert_path: None,
             mtls_key_path: None,

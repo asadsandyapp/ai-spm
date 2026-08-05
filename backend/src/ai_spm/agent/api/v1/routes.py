@@ -1,4 +1,4 @@
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,14 +9,13 @@ from ai_spm.core.schemas import (
     AgentPiiPolicyResponse,
     AgentRegisterRequest,
     AgentRegisterWithCertResponse,
-    AgentResponse,
     AgentUpdateCheckResponse,
     PromptRequest,
     PromptResponse,
     WebAuditRequest,
     WebAuditResponse,
 )
-from ai_spm.domain.enums import AgentStatus, AuditEventType, PolicyAction
+from ai_spm.domain.enums import AuditEventType, PolicyAction
 from ai_spm.domain.models import Agent, AuditEvent, Organization
 from ai_spm.infrastructure.db.session import get_session
 from ai_spm.services.cert_service import CertService
@@ -51,7 +50,7 @@ async def register_agent(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid organization")
 
     try:
-        agent = await agent_service.register(
+        registered = await agent_service.register(
             session,
             org_id=ctx.org_id,
             hostname=body.hostname,
@@ -66,8 +65,9 @@ async def register_agent(
             detail=str(exc),
         ) from exc
 
-    if not agent:
+    if not registered:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid org token")
+    agent, session_token = registered
 
     try:
         cert_info = cert_service.issue_agent_cert(ctx.org_id, agent.id, csr_pem=body.csr_pem)
@@ -99,6 +99,7 @@ async def register_agent(
         os_version=agent.os_version,
         agent_version=agent.agent_version,
         last_heartbeat_at=agent.last_heartbeat_at,
+        session_token=session_token,
         **cert_response_fields,
     )
 
