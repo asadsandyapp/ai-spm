@@ -5,16 +5,15 @@ import structlog
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
+from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
 from ai_spm.config import get_settings
 from ai_spm.domain.enums import OrganizationStatus
+from ai_spm.domain.models import Organization
 from ai_spm.infrastructure.db.session import get_platform_session
 from ai_spm.tenant.context import TenantContext, clear_tenant_context, set_tenant_context
-from sqlalchemy import select
-
-from ai_spm.domain.models import Organization
 
 logger = structlog.get_logger(__name__)
 

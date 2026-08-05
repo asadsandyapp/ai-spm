@@ -11,8 +11,7 @@ from starlette.responses import Response
 
 from ai_spm.domain.models import Agent, Subscription, UsageDaily
 from ai_spm.infrastructure.db.session import get_db_session
-from ai_spm.tenant.context import get_tenant_context, require_tenant_context
-from ai_spm.tenant.rls import set_rls_context
+from ai_spm.tenant.context import get_tenant_context
 
 logger = structlog.get_logger(__name__)
 

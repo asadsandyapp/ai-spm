@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -12,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_spm.domain.enums import AgentStatus, AuditEventType, PolicyAction, PromptDecision
 from ai_spm.domain.models import Agent, AuditEvent
 from ai_spm.infrastructure.guardrails.adapter import GuardrailsAdapter
-import time
-
 from ai_spm.infrastructure.llm.openai_adapter import LLMProviderError, OpenAIAdapter
-from ai_spm.infrastructure.metrics import prompt_pipeline_duration, prompts_blocked_total, prompts_total
+from ai_spm.infrastructure.metrics import (
+    prompt_pipeline_duration,
+    prompts_blocked_total,
+    prompts_total,
+)
 from ai_spm.infrastructure.presidio.adapter import PresidioAdapter
 from ai_spm.services.policy_engine import PolicyEngine
 from ai_spm.services.severity import attach_severity
@@ -197,7 +200,7 @@ class PromptPipelineService:
             response_content = await self._proxy_llm(
                 session, org_id, provider, model, masked_messages
             )
-        except PromptPipelineError as exc:
+        except PromptPipelineError:
             raise
         except Exception as exc:
             logger.error("llm_proxy_failed", error=str(exc))

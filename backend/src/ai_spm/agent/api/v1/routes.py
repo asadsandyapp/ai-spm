@@ -1,4 +1,4 @@
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,14 +9,13 @@ from ai_spm.core.schemas import (
     AgentPiiPolicyResponse,
     AgentRegisterRequest,
     AgentRegisterWithCertResponse,
-    AgentResponse,
     AgentUpdateCheckResponse,
     PromptRequest,
     PromptResponse,
     WebAuditRequest,
     WebAuditResponse,
 )
-from ai_spm.domain.enums import AgentStatus, AuditEventType, PolicyAction
+from ai_spm.domain.enums import AuditEventType, PolicyAction
 from ai_spm.domain.models import Agent, AuditEvent, Organization
 from ai_spm.infrastructure.db.session import get_session
 from ai_spm.services.cert_service import CertService
