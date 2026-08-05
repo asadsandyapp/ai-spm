@@ -45,12 +45,17 @@ REG=$(curl -sf -X POST "$BASE/agent/v1/register" \
   -d "{\"org_token\":\"$ORG_TOKEN\",\"hostname\":\"demo-host\",\"agent_version\":\"0.1.0\",\"os_version\":\"linux\"}")
 echo "$REG" | tee /tmp/aispm-register.json
 AGENT_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" <<<"$REG")
+SESSION_TOKEN=$(python3 -c "import json,sys; print(json.load(sys.stdin)['session_token'])" <<<"$REG")
 
 echo "==> Prompt inspect_only (PII email)"
+# Every /agent/v1/* call other than /register requires the per-agent session
+# token issued at registration (Bearer), not just the X-Org-ID/X-Agent-ID
+# pair — see tenant/middleware.py::_verify_agent_session_token.
 PROMPT=$(curl -sf -X POST "$BASE/agent/v1/prompt" \
   -H "Content-Type: application/json" \
   -H "X-Org-ID: $ORG_ID" \
   -H "X-Agent-ID: $AGENT_ID" \
+  -H "Authorization: Bearer $SESSION_TOKEN" \
   -d "{\"inspect_only\":true,\"provider\":\"openai\",\"model\":\"gpt-4\",\"messages\":[{\"role\":\"user\",\"content\":\"Contact jane@acme.com about payroll\"}]}")
 echo "$PROMPT" | tee /tmp/aispm-prompt.json
 

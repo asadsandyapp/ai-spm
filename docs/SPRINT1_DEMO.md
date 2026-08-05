@@ -28,8 +28,8 @@ make demo-sprint1
 1. `POST /public/v1/signup` — response includes `verification_token` (non-production).
 2. `GET /public/v1/verify-email?token=…` — response includes **`org_token` once**.
 3. `POST /admin/v1/auth/login` — JWT.
-4. `POST /agent/v1/register` with `X-Org-ID` + body `org_token`.
-5. `POST /agent/v1/prompt` with `inspect_only: true` + `X-Org-ID` / `X-Agent-ID`.
+4. `POST /agent/v1/register` with `X-Org-ID` + body `org_token` — response includes a **per-agent `session_token` once** (store it, like `org_token`).
+5. `POST /agent/v1/prompt` with `inspect_only: true` + `X-Org-ID` / `X-Agent-ID` + `Authorization: Bearer <session_token>`. Every `/agent/v1/*` call other than `/register` requires the session token — bare `X-Org-ID`/`X-Agent-ID` alone is not sufficient (closes a header-forgery gap; see `tenant/middleware.py::_verify_agent_session_token`).
 6. `GET /admin/v1/audit` with Bearer JWT.
 
 ## Dev tenant (no signup)
