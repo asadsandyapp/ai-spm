@@ -391,13 +391,31 @@ class AgentService:
         await session.commit()
         return True
 
-    async def delete(self, session: AsyncSession, org_id: UUID, agent_id: UUID) -> bool:
+    async def delete(
+        self,
+        session: AsyncSession,
+        org_id: UUID,
+        agent_id: UUID,
+        *,
+        purge_data: bool = False,
+    ) -> bool:
         result = await session.execute(
             select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
         )
         agent = result.scalar_one_or_none()
         if not agent:
             return False
+        if purge_data:
+            from sqlalchemy import delete as sa_delete
+
+            from ai_spm.domain.models import AuditEvent
+
+            await session.execute(
+                sa_delete(AuditEvent).where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.agent_id == agent_id,
+                )
+            )
         await session.delete(agent)
         await session.commit()
         return True

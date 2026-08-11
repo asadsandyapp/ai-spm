@@ -8,6 +8,7 @@ pub mod gateway;
 pub mod heartbeat;
 pub mod local_api;
 pub mod network_setup;
+pub mod protection;
 pub mod proxy;
 
 pub use config::Config;

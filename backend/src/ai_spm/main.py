@@ -7,7 +7,9 @@ from prometheus_client import make_asgi_app
 from sqlalchemy import text
 
 from ai_spm.admin.api.v1.routes import router as admin_router
+from ai_spm.admin.api.v1.billing_routes import router as admin_billing_router
 from ai_spm.agent.api.v1.routes import router as agent_router
+from ai_spm.billing.access_gate import SubscriptionAccessMiddleware
 from ai_spm.billing.stripe_webhook import router as billing_router
 from ai_spm.config import get_settings
 from ai_spm.infrastructure.db.session import get_platform_session
@@ -57,10 +59,12 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(QuotaMiddleware)
     app.add_middleware(OrgIdBodyValidationMiddleware)
+    app.add_middleware(SubscriptionAccessMiddleware)
     app.add_middleware(TenantContextMiddleware)
 
     app.include_router(public_router)
     app.include_router(admin_router)
+    app.include_router(admin_billing_router, prefix="/admin/v1")
     app.include_router(agent_router)
     app.include_router(platform_router)
     app.include_router(billing_router)

@@ -223,9 +223,9 @@ export function DownloadAgentPage() {
           </h2>
           <p className="mt-1 text-sm text-ink-500">
             One sealed <code className="text-xs">.run</code> file embeds the
-            agent, web-UI mitmproxy masking, and this organization’s enrollment
-            secrets. Employees install once — network MITM protects AI traffic;
-            agents register only to your tenant.
+            endpoint agent, browser AI protection, and this organization’s
+            enrollment secrets. Employees install once — AI traffic is
+            protected automatically, and agents register only to your workspace.
           </p>
         </div>
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -240,7 +240,7 @@ export function DownloadAgentPage() {
               </p>
               <p className="mt-1 text-xs text-ink-500">
                 Run <code className="text-xs">make installer-linux</code> so the
-                API embeds the GUI, agent binary, and mitmproxy scripts.
+                download includes the guided installer and agent binary.
               </p>
             </div>
           </div>
@@ -263,12 +263,12 @@ export function DownloadAgentPage() {
           <li>
             They double-click / run{" "}
             <code className="text-xs">./aispm-agent-linux-*.run</code> and enter
-            their password once — install is automatic (agent + network MITM +
-            web-UI mitmproxy).
+            their password once — install is automatic and protection starts
+            for AI apps and browser sessions.
           </li>
           <li>
-            After install, quit and reopen browsers so the MITM CA and desktop
-            proxy are picked up. Device appears Online under{" "}
+            After install, quit and reopen browsers so the new trust settings
+            take effect. The device appears Online under{" "}
             <a className="text-brand-700 underline" href="/agents">
               Agent Fleet
             </a>

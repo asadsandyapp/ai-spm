@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   Info,
@@ -24,6 +26,7 @@ import {
 } from "@/components/ui/States";
 import { useThreats } from "@/hooks/queries";
 import { useDashboardWebSocket } from "@/hooks/useDashboardWebSocket";
+import { adminApi } from "@/lib/api";
 import { cn, formatDateTime, providerLabel } from "@/lib/utils";
 
 const LIMITS = [25, 50, 100];
@@ -33,8 +36,16 @@ export function ThreatsPage() {
   const [limit, setLimit] = useState(50);
   const [filters, setFilters] = useState<FeedFilterState>(EMPTY_FEED_FILTERS);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
+  const entitlementsQ = useQuery({
+    queryKey: ["billing", "entitlements"],
+    queryFn: ({ signal }) => adminApi.me(signal),
+  });
+  const threatEntitled = Boolean(
+    (entitlementsQ.data?.entitlements as { features?: { threat_detection?: boolean } } | null)
+      ?.features?.threat_detection,
+  );
   const { data, isLoading, isError, error, refetch, isFetching } =
-    useThreats(limit);
+    useThreats(limit, { enabled: threatEntitled });
 
   function toggleRowExpand(id: string) {
     setExpandedRows((prev) => {
@@ -64,6 +75,31 @@ export function ThreatsPage() {
     () => applyFeedFilters(threats, filters),
     [threats, filters],
   );
+
+  if (entitlementsQ.isLoading) {
+    return <Spinner />;
+  }
+
+  if (!threatEntitled) {
+    return (
+      <>
+        <PageHeader
+          title="Threat Feed"
+          description="Jailbreak and injection detection is included on Professional and Enterprise."
+        />
+        <EmptyState
+          icon={ShieldAlert}
+          title="Threat detection not on your plan"
+          description="Starter includes PII masking and audit. Upgrade to Professional to unlock jailbreak / injection detection in the threat feed."
+          action={
+            <Link to="/onboarding/plans" className="btn-primary">
+              Upgrade plan
+            </Link>
+          }
+        />
+      </>
+    );
+  }
 
   const limitControl = (
     <div className="inline-flex items-center gap-2 text-sm text-ink-500">

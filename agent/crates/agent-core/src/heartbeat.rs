@@ -6,6 +6,7 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 use crate::gateway::{GatewayClient, GatewayError};
+use crate::protection::enter_protection_disabled;
 
 /// Default heartbeat interval per IMPLEMENTATION_ROADMAP (60 seconds).
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -17,20 +18,21 @@ pub enum HeartbeatError {
 }
 
 /// Run the periodic heartbeat loop until the shutdown signal fires.
+///
+/// On gateway **403 (revoked)** or **404 (deleted)**, protection is paused
+/// locally (flag + tear-down) and `shutdown` is signalled so MITM tasks exit.
+/// We deliberately do **not** auto re-register — that was leaving masking on
+/// after an admin deleted the agent from the console.
 pub async fn run_heartbeat_loop(
     client: Arc<GatewayClient>,
     mut shutdown: watch::Receiver<bool>,
+    shutdown_tx: watch::Sender<bool>,
 ) -> Result<(), HeartbeatError> {
     info!(
         interval_secs = HEARTBEAT_INTERVAL.as_secs(),
         "starting heartbeat loop"
     );
 
-    // Note: the first `interval.tick()` completes immediately, so if the agent is
-    // already registered it goes online right away. The loop must NOT exit when the
-    // agent isn't registered yet — registration can complete asynchronously (see the
-    // background registration retry). Skipping ticks until registered lets the agent
-    // come online automatically once the gateway is reachable.
     let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
 
     loop {
@@ -48,14 +50,21 @@ pub async fn run_heartbeat_loop(
                 }
                 match client.heartbeat().await {
                     Ok(()) => debug!("heartbeat sent"),
-                    Err(GatewayError::Api { status, .. }) if status.as_u16() == 404 => {
-                        // Our record was deleted on the gateway (e.g. admin removed it).
-                        // Re-register so the agent reappears in the fleet and keeps protecting.
-                        warn!("gateway reports agent record missing — re-registering");
-                        match client.register().await {
-                            Ok(agent) => info!(agent_id = %agent.id, "re-registered after record deletion"),
-                            Err(reg_err) => error!(error = %reg_err, "re-registration failed; will retry"),
-                        }
+                    Err(GatewayError::Api { status, .. })
+                        if status.as_u16() == 403 || status.as_u16() == 404 =>
+                    {
+                        let reason = if status.as_u16() == 403 {
+                            "revoked"
+                        } else {
+                            "deleted"
+                        };
+                        warn!(
+                            status = status.as_u16(),
+                            "gateway removed this agent ({reason}) — disabling local protection"
+                        );
+                        enter_protection_disabled(client.as_ref(), reason);
+                        let _ = shutdown_tx.send(true);
+                        return Ok(());
                     }
                     Err(err) => error!(error = %err, "heartbeat failed"),
                 }
@@ -105,7 +114,7 @@ mod tests {
         let config = test_config(None);
         let client = Arc::new(GatewayClient::new(&config).unwrap());
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(run_heartbeat_loop(client, rx));
+        let handle = tokio::spawn(run_heartbeat_loop(client, rx, tx.clone()));
         tx.send(true).unwrap();
         handle.await.unwrap().unwrap();
     }

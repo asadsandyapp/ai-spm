@@ -20,7 +20,22 @@ export type OrganizationStatus =
   | "suspended"
   | "deleted";
 
-export type SubscriptionPlan = "free" | "pro" | "enterprise";
+export type SubscriptionPlan = "starter" | "professional" | "enterprise";
+
+export type SubscriptionStatus =
+  | "incomplete"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "suspended"
+  | "expired";
+
+export type OnboardingStep =
+  | "registered"
+  | "email_verified"
+  | "plan_selected"
+  | "checkout_pending"
+  | "complete";
 
 export interface LoginRequest {
   email: string;
@@ -39,6 +54,20 @@ export interface UserResponse {
   full_name: string;
   role: UserRole;
   org_id: string;
+  subscription_status?: string | null;
+  onboarding_step?: string | null;
+  plan?: string | null;
+  console_access?: boolean;
+  entitlements?: Record<string, unknown> | null;
+}
+
+export interface PlatformUserResponse {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_active?: boolean;
+  last_login_at?: string | null;
 }
 
 export interface AgentResponse {
@@ -114,12 +143,27 @@ export interface TenantListItem {
   created_at: string;
   agent_count: number;
   plan: SubscriptionPlan | string;
+  subscription_status?: string;
+  current_period_end?: string | null;
+  trial_ends_at?: string | null;
+  has_stripe_customer?: boolean;
 }
 
 export interface TenantDetailResponse extends TenantListItem {
   prompts_today: number;
-  max_agents: number;
+  max_agents: number | null;
   max_prompts_per_day: number;
+  max_prompts_per_month?: number | null;
+  max_users?: number | null;
+  user_count?: number;
+  audit_retention_days?: number | null;
+  billing_interval?: string;
+  cancel_at_period_end?: boolean;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  expires_at?: string | null;
+  past_due_since?: string | null;
+  onboarding_step?: string | null;
 }
 
 export interface UsageResponse {

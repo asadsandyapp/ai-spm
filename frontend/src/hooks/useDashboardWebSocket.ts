@@ -51,7 +51,16 @@ export function useDashboardWebSocket(enabled = true) {
         return;
       }
 
-      const ws = new WebSocket(dashboardWebSocketUrl(token));
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(dashboardWebSocketUrl(token));
+      } catch {
+        // Bad URL / env misconfig must not white-screen the dashboard.
+        if (!cancelled && enabledRef.current) {
+          reconnectRef.current = setTimeout(connect, RECONNECT_MS);
+        }
+        return;
+      }
       wsRef.current = ws;
 
       ws.onmessage = (event) => {

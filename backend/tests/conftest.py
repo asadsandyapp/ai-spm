@@ -18,6 +18,7 @@ from ai_spm.config import get_settings
 from ai_spm.domain.enums import (
     AgentStatus,
     AuditEventType,
+    OnboardingStep,
     OrganizationStatus,
     PlatformRole,
     SubscriptionPlan,
@@ -123,7 +124,7 @@ async def clean_db(engine) -> AsyncGenerator[None, None]:
         "billing_events", "platform_audit_logs", "email_verification_tokens",
         "tenant_invitations", "usage_daily", "llm_provider_configs",
         "audit_events", "policies", "agents", "departments", "users",
-        "subscriptions", "organizations", "platform_users",
+        "subscriptions", "organizations", "platform_users", "sales_leads",
     ]
     async with get_platform_session() as session:
         for table in tables:
@@ -165,11 +166,13 @@ async def tenant_a(db_session: AsyncSession) -> dict:
         )
         sub = Subscription(
             org_id=org.id,
-            plan=SubscriptionPlan.FREE,
+            plan=SubscriptionPlan.STARTER,
             status=SubscriptionStatus.ACTIVE,
-            max_agents=10,
-            max_prompts_per_day=1000,
-            audit_retention_days=90,
+            onboarding_step=OnboardingStep.COMPLETE,
+            max_agents=25,
+            max_prompts_per_day=1667,
+            max_prompts_per_month=50_000,
+            audit_retention_days=7,
         )
         agent = Agent(
             id=uuid.uuid4(),
@@ -219,11 +222,13 @@ async def tenant_b(db_session: AsyncSession) -> dict:
         )
         sub = Subscription(
             org_id=org.id,
-            plan=SubscriptionPlan.FREE,
+            plan=SubscriptionPlan.STARTER,
             status=SubscriptionStatus.ACTIVE,
-            max_agents=10,
-            max_prompts_per_day=1000,
-            audit_retention_days=90,
+            onboarding_step=OnboardingStep.COMPLETE,
+            max_agents=25,
+            max_prompts_per_day=1667,
+            max_prompts_per_month=50_000,
+            audit_retention_days=7,
         )
         agent = Agent(
             id=uuid.uuid4(),

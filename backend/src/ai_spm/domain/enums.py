@@ -9,17 +9,28 @@ class OrganizationStatus(str, enum.Enum):
 
 
 class SubscriptionPlan(str, enum.Enum):
-    FREE = "free"
-    PRO = "pro"
+    STARTER = "starter"
+    PROFESSIONAL = "professional"
     ENTERPRISE = "enterprise"
 
 
 class SubscriptionStatus(str, enum.Enum):
-    TRIALING = "trialing"
+    """Commercial subscription lifecycle (server-authoritative access gate)."""
+
+    INCOMPLETE = "incomplete"  # registered → checkout not completed
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELED = "canceled"
     SUSPENDED = "suspended"
+    EXPIRED = "expired"
+
+
+class OnboardingStep(str, enum.Enum):
+    REGISTERED = "registered"
+    EMAIL_VERIFIED = "email_verified"
+    PLAN_SELECTED = "plan_selected"
+    CHECKOUT_PENDING = "checkout_pending"
+    COMPLETE = "complete"
 
 
 class UserRole(str, enum.Enum):

@@ -4,7 +4,12 @@ import uuid
 
 import pytest
 
-from ai_spm.domain.enums import OrganizationStatus, SubscriptionPlan, SubscriptionStatus
+from ai_spm.domain.enums import (
+    OnboardingStep,
+    OrganizationStatus,
+    SubscriptionPlan,
+    SubscriptionStatus,
+)
 from ai_spm.domain.models import Organization, Policy, Subscription
 from ai_spm.infrastructure.db.session import get_platform_session
 from ai_spm.services.policy_engine import PolicyEngine
@@ -22,11 +27,13 @@ async def test_policy_blocks_disallowed_model():
         )
         sub = Subscription(
             org_id=org_id,
-            plan=SubscriptionPlan.FREE,
+            plan=SubscriptionPlan.STARTER,
             status=SubscriptionStatus.ACTIVE,
-            max_agents=10,
-            max_prompts_per_day=1000,
-            audit_retention_days=90,
+            onboarding_step=OnboardingStep.COMPLETE,
+            max_agents=25,
+            max_prompts_per_day=1667,
+            max_prompts_per_month=50_000,
+            audit_retention_days=7,
         )
         policy = Policy(
             org_id=org_id,
@@ -56,11 +63,13 @@ async def test_policy_allows_permitted_model():
         )
         sub = Subscription(
             org_id=org_id,
-            plan=SubscriptionPlan.FREE,
+            plan=SubscriptionPlan.STARTER,
             status=SubscriptionStatus.ACTIVE,
-            max_agents=10,
-            max_prompts_per_day=1000,
-            audit_retention_days=90,
+            onboarding_step=OnboardingStep.COMPLETE,
+            max_agents=25,
+            max_prompts_per_day=1667,
+            max_prompts_per_month=50_000,
+            audit_retention_days=7,
         )
         policy = Policy(
             org_id=org_id,

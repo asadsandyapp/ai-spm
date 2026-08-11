@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 
 class SignupRequest(BaseModel):
@@ -45,6 +45,11 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     org_id: UUID
+    subscription_status: str | None = None
+    onboarding_step: str | None = None
+    plan: str | None = None
+    console_access: bool = False
+    entitlements: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -174,13 +179,49 @@ class TenantListItem(BaseModel):
     status: str
     created_at: datetime
     agent_count: int = 0
-    plan: str = "free"
+    plan: str = "starter"
+    subscription_status: str = "incomplete"
+    current_period_end: datetime | None = None
+    trial_ends_at: datetime | None = None
+    has_stripe_customer: bool = False
 
 
 class TenantDetailResponse(TenantListItem):
     prompts_today: int = 0
-    max_agents: int = 0
+    max_agents: int | None = 0
     max_prompts_per_day: int = 0
+    max_prompts_per_month: int | None = None
+    max_users: int | None = None
+    user_count: int = 0
+    audit_retention_days: int | None = None
+    billing_interval: str = "month"
+    cancel_at_period_end: bool = False
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    expires_at: datetime | None = None
+    past_due_since: datetime | None = None
+    onboarding_step: str | None = None
+
+
+class PlatformUserResponse(BaseModel):
+    id: UUID
+    email: str
+    full_name: str
+    role: str
+    is_active: bool = True
+    last_login_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=12, max_length=128)
 
 
 class PlatformLoginRequest(BaseModel):
@@ -195,9 +236,74 @@ class SuspendTenantRequest(BaseModel):
 class UsageResponse(BaseModel):
     agent_count: int
     prompts_today: int
+    prompts_this_month: int = 0
     max_agents: int
     max_prompts_per_day: int
+    max_prompts_per_month: int = 0
     plan: str
+    status: str | None = None
+    onboarding_step: str | None = None
+    max_agents_unlimited: bool = False
+    prompts_unlimited: bool = False
+    audit_retention_days: int = 7
+
+
+class ContactSalesRequest(BaseModel):
+    """Accept both live Docker field names and commercial schema aliases."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    company_name: str = Field(..., min_length=2, max_length=255)
+    contact_name: str = Field(..., min_length=2, max_length=255)
+    email: EmailStr = Field(
+        ...,
+        validation_alias=AliasChoices("email", "contact_email"),
+    )
+    phone: str | None = Field(None, max_length=64)
+    estimated_agents: int | None = Field(
+        None,
+        ge=1,
+        le=1_000_000,
+        validation_alias=AliasChoices("estimated_agents", "estimated_seats"),
+    )
+    message: str | None = Field(None, max_length=4000)
+
+
+class ContactSalesResponse(BaseModel):
+    id: UUID
+    message: str = "Thanks — our team will contact you shortly."
+
+
+class SalesLeadResponse(BaseModel):
+    id: UUID
+    company_name: str
+    contact_name: str
+    email: str
+    phone: str | None
+    estimated_agents: int | None
+    message: str | None
+    status: str
+    org_id: UUID | None
+    notes: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AssignPlanRequest(BaseModel):
+    plan: str = Field(..., pattern="^(starter|professional|enterprise)$")
+    status: str | None = Field(default=None)
+    max_agents: int | None = Field(None, ge=0)
+    max_users: int | None = Field(None, ge=0)
+    max_prompts_per_day: int | None = Field(None, ge=0)
+    max_prompts_per_month: int | None = Field(None, ge=0)
+    audit_retention_days: int | None = Field(None, ge=1)
+    activate: bool = True
+
+
+class UpdateLeadRequest(BaseModel):
+    status: str = Field(..., pattern="^(new|contacted|won|lost)$")
+    notes: str | None = None
 
 
 class DashboardMetricsResponse(BaseModel):

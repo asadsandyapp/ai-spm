@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-SPM — Platform Foundation</title>
+<style>
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #172033;
+    background: #fff;
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.45;
+  }
+  .cover {
+    border-bottom: 3px solid #1e3a5f;
+    margin-bottom: 6mm;
+    padding-bottom: 4mm;
+  }
+  .cover .eyebrow {
+    color: #5b6b85;
+    font-size: 8.5pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin: 0 0 2mm;
+  }
+  .cover h1 {
+    color: #0f1b2d;
+    font-size: 22pt;
+    margin: 0 0 2mm;
+  }
+  .cover .subtitle {
+    color: #4a5568;
+    font-size: 10.5pt;
+    margin: 0;
+  }
+  h2 {
+    color: #0f1b2d;
+    font-size: 13pt;
+    border-bottom: 1.5px solid #d5dde8;
+    padding-bottom: 1.5mm;
+    margin: 6mm 0 3mm;
+  }
+  p { margin: 0 0 2.5mm; }
+  .callout {
+    background: #f4f7fb;
+    border-left: 3px solid #1e3a5f;
+    padding: 3mm 4mm;
+    margin: 3mm 0 4mm;
+  }
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    margin: 0 0 4mm;
+    table-layout: fixed;
+  }
+  th {
+    background: #1e3a5f;
+    color: #fff;
+    font-size: 8pt;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 2.2mm 2.5mm;
+  }
+  th:first-child { border-radius: 4px 0 0 0; }
+  th:last-child { border-radius: 0 4px 0 0; }
+  td {
+    border-bottom: 1px solid #dfe3ec;
+    border-right: 1px solid #e8ebf2;
+    padding: 2.2mm 2.5mm;
+    vertical-align: top;
+    font-size: 8.8pt;
+    overflow-wrap: anywhere;
+  }
+  td:first-child { border-left: 1px solid #e8ebf2; font-weight: 700; color: #1e3a5f; }
+  tbody tr:nth-child(even) td { background: #f7f9fc; }
+  .code {
+    font-family: "DejaVu Sans Mono", Consolas, monospace;
+    font-size: 8pt;
+    background: #eef2f7;
+    padding: 0.5px 3px;
+    border-radius: 2px;
+  }
+  .diagram {
+    background: #f8fafc;
+    border: 1px solid #d5dde8;
+    border-radius: 4px;
+    padding: 3.5mm 4mm;
+    margin: 2mm 0 4mm;
+    font-family: "DejaVu Sans Mono", Consolas, monospace;
+    font-size: 7.6pt;
+    line-height: 1.35;
+    white-space: pre;
+  }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <p class="eyebrow">AI-SPM</p>
+  <h1>Platform Foundation</h1>
+  <p class="subtitle">What we stand up first — foundation pieces and repository layout every later module depends on.</p>
+</div>
+
+<div class="callout">
+  <strong>Purpose.</strong> Stand up the core platform every later module depends on: a durable store for companies, users, devices, policies, and activity; a secure front door for console and agent traffic; a repeatable local staging environment; health checks for demos; rate limits so one noisy source cannot starve others; and a simple Linux install path so managed PCs can join. Without this foundation, signup, the admin console, and the endpoint agent cannot function.
+</div>
+
+<h2>1. What “foundation” means here</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Foundation piece</th>
+      <th>Why it exists</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Project structure</td><td>Known folders for backend, frontend, agent, deploy, scripts — so work lands in the right place</td></tr>
+    <tr><td>Local staging</td><td>One Compose stack the team can start for demos and testing</td></tr>
+    <tr><td>Company data model</td><td>Organizations and related tables every feature hangs off</td></tr>
+    <tr><td>Customer isolation</td><td>One company never sees another company’s data</td></tr>
+    <tr><td>Health &amp; readiness</td><td>Operators know the stack is alive before a walkthrough</td></tr>
+    <tr><td>Secure gateway</td><td>Front door + traffic limits for console and agents</td></tr>
+    <tr><td>Endpoint install</td><td>Sealed Linux package so protection can start on a PC</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Project structure (repository)</h2>
+<p>Top-level layout of the AI-SPM monorepo. This is the map for foundation work — not the tech catalog (that lives in Application Architecture).</p>
+
+<div class="diagram">AI-SPM/
+├── backend/          # Security core (Python FastAPI package ai_spm)
+│   ├── src/ai_spm/   # Application code
+│   ├── alembic/      # Database migrations
+│   ├── tests/        # Unit, integration, security tests
+│   └── scripts/      # Seed helpers (dev tenant, platform admin)
+├── frontend/         # Admin + platform React SPA
+├── agent/            # Rust endpoint agent workspace
+├── deploy/           # Docker Compose, Kong, K8s, Prometheus, Grafana, systemd
+├── scripts/          # install-agent, mitmproxy web UI, cert helpers
+├── docs/             # Setup, demos, foundation / architecture docs
+├── infrastructure/   # Dev / local CA material
+├── Makefile          # up / migrate / seed / test / agent-build
+└── AGENTS.md         # Coding-agent source of truth</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:22%">Folder</th>
+      <th style="width:38%">Belongs here</th>
+      <th style="width:40%">Does not belong here</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="code">backend/</span></td>
+      <td>Domain, HTTP surfaces, services, adapters, migrations, tests</td>
+      <td>React assets, Rust agent binaries</td>
+    </tr>
+    <tr>
+      <td><span class="code">frontend/</span></td>
+      <td>Console UI pages, hooks, stores, client types</td>
+      <td>Server secrets, pipeline business rules</td>
+    </tr>
+    <tr>
+      <td><span class="code">agent/</span></td>
+      <td>Endpoint daemon, MITM, enrollment client, installer crates</td>
+      <td>Gateway business logic (keep in backend services)</td>
+    </tr>
+    <tr>
+      <td><span class="code">deploy/</span></td>
+      <td>Compose, Kong config, K8s, monitoring, systemd templates</td>
+      <td>Application feature code</td>
+    </tr>
+    <tr>
+      <td><span class="code">scripts/</span></td>
+      <td>Linux install engine, mitmproxy addon, cert generation</td>
+      <td>Runtime product screens</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>

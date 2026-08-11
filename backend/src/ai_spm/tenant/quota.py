@@ -8,10 +8,10 @@ from sqlalchemy import func, select
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from ai_spm.billing.entitlements import is_unlimited
 from ai_spm.domain.models import Agent, Subscription, UsageDaily
 from ai_spm.infrastructure.db.session import get_db_session
-from ai_spm.tenant.context import get_tenant_context, require_tenant_context
-from ai_spm.tenant.rls import set_rls_context
+from ai_spm.tenant.context import get_tenant_context
 
 logger = structlog.get_logger(__name__)
 
@@ -33,15 +33,18 @@ async def get_subscription_limits(org_id: UUID) -> tuple[int, int]:
         )
         row = result.one_or_none()
         if row is None:
-            from ai_spm.config import get_settings
+            from ai_spm.billing.entitlements import get_plan
+            from ai_spm.domain.enums import SubscriptionPlan
 
-            settings = get_settings()
-            return settings.default_free_max_agents, settings.default_free_max_prompts_per_day
+            defn = get_plan(SubscriptionPlan.STARTER)
+            return defn.max_agents, defn.max_prompts_per_day
         return row[0], row[1]
 
 
 async def check_agent_quota(org_id: UUID) -> None:
     max_agents, _ = await get_subscription_limits(org_id)
+    if is_unlimited(max_agents):
+        return
     async with get_db_session(org_id) as session:
         result = await session.execute(
             select(func.count()).select_from(Agent).where(Agent.org_id == org_id)
@@ -53,6 +56,8 @@ async def check_agent_quota(org_id: UUID) -> None:
 
 async def check_prompt_quota(org_id: UUID) -> None:
     _, max_prompts = await get_subscription_limits(org_id)
+    if is_unlimited(max_prompts):
+        return
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with get_db_session(org_id) as session:

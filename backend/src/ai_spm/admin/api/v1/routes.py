@@ -11,6 +11,7 @@ from ai_spm.core.schemas import (
     AgentResponse,
     AuditEventResponse,
     AuditExportResponse,
+    ChangePasswordRequest,
     CreatePolicyRequest,
     CreateUserRequest,
     DashboardMetricsResponse,
@@ -26,6 +27,7 @@ from ai_spm.core.schemas import (
     TokenResponse,
     UpdatePiiDetectionRequest,
     UpdatePolicyRequest,
+    UpdateProfileRequest,
     UserResponse,
 )
 from ai_spm.domain.enums import OrganizationStatus, UserRole
@@ -113,6 +115,8 @@ async def login(body: LoginRequest) -> TokenResponse:
 
 @router.get("/auth/me", response_model=UserResponse)
 async def me(session: AsyncSession = Depends(get_session)) -> UserResponse:
+    from ai_spm.billing.subscription_service import SubscriptionService
+
     ctx = require_tenant_context()
     result = await session.execute(
         select(User).where(User.id == ctx.user_id, User.org_id == ctx.org_id)
@@ -120,7 +124,85 @@ async def me(session: AsyncSession = Depends(get_session)) -> UserResponse:
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return UserResponse.model_validate(user)
+    sub_svc = SubscriptionService()
+    sub = await sub_svc.get_or_create(session, ctx.org_id)
+    entitlements = sub_svc.entitlements_payload(sub)
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role.value,
+        org_id=user.org_id,
+        subscription_status=sub.status.value,
+        onboarding_step=sub.onboarding_step.value,
+        plan=sub.plan.value,
+        console_access=entitlements["console_access"],
+        entitlements=entitlements,
+    )
+
+
+@router.patch("/auth/me", response_model=UserResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    session: AsyncSession = Depends(get_session),
+) -> UserResponse:
+    ctx = require_tenant_context()
+    result = await session.execute(
+        select(User).where(User.id == ctx.user_id, User.org_id == ctx.org_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.full_name = body.full_name.strip()
+    if body.email is not None:
+        new_email = str(body.email).lower()
+        if new_email != user.email:
+            clash = (
+                await session.execute(
+                    select(User).where(
+                        User.org_id == ctx.org_id,
+                        User.email == new_email,
+                        User.id != user.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if clash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email already in use in this organization",
+                )
+            user.email = new_email
+    await session.commit()
+    await session.refresh(user)
+    return await me(session)
+
+
+@router.post("/auth/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    ctx = require_tenant_context()
+    result = await session.execute(
+        select(User).where(User.id == ctx.user_id, User.org_id == ctx.org_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    if body.current_password == body.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from the current password",
+        )
+    user.password_hash = hash_password(body.new_password)
+    await session.commit()
+    return {"status": "ok", "message": "Password updated"}
 
 
 @router.get("/dashboard/metrics", response_model=DashboardMetricsResponse)
@@ -266,10 +348,14 @@ async def revoke_agent(
 async def delete_agent(
     agent_id: UUID,
     session: AsyncSession = Depends(get_session),
+    purge_data: bool = Query(
+        False,
+        description="When true, also delete audit events attributed to this agent.",
+    ),
 ) -> None:
     _require_permission("agents:write")
     ctx = require_tenant_context()
-    ok = await agent_service.delete(session, ctx.org_id, agent_id)
+    ok = await agent_service.delete(session, ctx.org_id, agent_id, purge_data=purge_data)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 

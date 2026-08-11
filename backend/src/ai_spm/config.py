@@ -60,12 +60,16 @@ class Settings(BaseSettings):
         ]
     )
 
-    default_free_max_agents: int = 10
-    default_free_max_prompts_per_day: int = 1000
-    default_pro_max_agents: int = 100
-    default_pro_max_prompts_per_day: int = 50000
-    default_enterprise_max_agents: int = 10000
-    default_enterprise_max_prompts_per_day: int = 1_000_000
+    default_starter_max_agents: int = 25
+    default_starter_max_prompts_per_month: int = 50_000
+    default_professional_max_agents: int = 150
+    default_professional_max_prompts_per_month: int = 500_000
+    default_enterprise_max_agents: int = 0  # unlimited
+    default_enterprise_max_prompts_per_month: int = 0  # unlimited
+    past_due_grace_days: int = 7
+    stripe_price_starter: str = "starter_monthly"
+    stripe_price_professional: str = "professional_monthly"
+    stripe_price_enterprise: str = "enterprise_monthly"
 
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"

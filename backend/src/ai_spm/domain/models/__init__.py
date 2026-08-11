@@ -20,6 +20,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from ai_spm.domain.enums import (
     AgentStatus,
     AuditEventType,
+    OnboardingStep,
     OrganizationStatus,
     PlatformRole,
     PolicyAction,
@@ -79,19 +80,28 @@ class Subscription(Base, TimestampMixin):
     )
     plan: Mapped[SubscriptionPlan] = mapped_column(
         Enum(SubscriptionPlan, name="subscription_plan", values_callable=lambda ec: [m.value for m in ec]),
-        default=SubscriptionPlan.FREE,
+        default=SubscriptionPlan.STARTER,
         nullable=False,
     )
     status: Mapped[SubscriptionStatus] = mapped_column(
         Enum(SubscriptionStatus, name="subscription_status", values_callable=lambda ec: [m.value for m in ec]),
-        default=SubscriptionStatus.TRIALING,
+        default=SubscriptionStatus.INCOMPLETE,
         nullable=False,
     )
-    max_agents: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
-    max_prompts_per_day: Mapped[int] = mapped_column(Integer, default=1000, nullable=False)
-    audit_retention_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    onboarding_step: Mapped[OnboardingStep] = mapped_column(
+        Enum(OnboardingStep, name="onboarding_step", values_callable=lambda ec: [m.value for m in ec]),
+        default=OnboardingStep.REGISTERED,
+        nullable=False,
+    )
+    max_agents: Mapped[int] = mapped_column(Integer, default=25, nullable=False)
+    max_prompts_per_day: Mapped[int] = mapped_column(Integer, default=1667, nullable=False)
+    max_prompts_per_month: Mapped[int] = mapped_column(Integer, default=50_000, nullable=False)
+    audit_retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="subscription")
@@ -335,6 +345,25 @@ class BillingEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SalesLead(Base, TimestampMixin):
+    """Enterprise contact-sales inbox for Super Admin (no audit prompt bodies)."""
+
+    __tablename__ = "sales_leads"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    estimated_agents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="new", nullable=False)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("ix_sales_leads_status_created", "status", "created_at"),)
 
 
 # Tables subject to RLS (tenant-scoped)

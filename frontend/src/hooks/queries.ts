@@ -11,6 +11,7 @@ import type {
 
 export const queryKeys = {
   me: ["admin", "me"] as const,
+  platformMe: ["platform", "me"] as const,
   agents: ["admin", "agents"] as const,
   enrollment: ["admin", "agents", "enrollment"] as const,
   audit: (limit: number) => ["admin", "audit", limit] as const,
@@ -23,6 +24,8 @@ export const queryKeys = {
   users: ["admin", "users"] as const,
   llmConfigs: ["admin", "llm-configs"] as const,
   tenants: ["platform", "tenants"] as const,
+  tenant: (orgId: string) => ["platform", "tenants", orgId] as const,
+  billingOverview: ["platform", "billing", "overview"] as const,
 };
 
 export function useMe(enabled = true) {
@@ -119,11 +122,12 @@ export function useReportSummary(params: ReportQuery) {
   });
 }
 
-export function useThreats(limit = 50) {
+export function useThreats(limit = 50, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.threats(limit),
     queryFn: ({ signal }) => adminApi.dashboardThreats(limit, signal),
     refetchInterval: 30_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 
@@ -163,7 +167,13 @@ export function useRevokeAgent() {
 export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => adminApi.deleteAgent(id),
+    mutationFn: ({
+      id,
+      purge_data,
+    }: {
+      id: string;
+      purge_data?: boolean;
+    }) => adminApi.deleteAgent(id, { purge_data }),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.agents }),
   });
 }
@@ -209,5 +219,32 @@ export function useTenants() {
     queryKey: queryKeys.tenants,
     queryFn: ({ signal }) => platformApi.tenants(signal),
     refetchInterval: 60_000,
+  });
+}
+
+export function useTenant(orgId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.tenant(orgId ?? ""),
+    queryFn: ({ signal }) => platformApi.tenant(orgId!, signal),
+    enabled: Boolean(orgId),
+  });
+}
+
+export function usePlatformMe(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.platformMe,
+    queryFn: ({ signal }) => platformApi.me(signal),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useBillingOverview(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.billingOverview,
+    queryFn: ({ signal }) => platformApi.billingOverview(signal),
+    enabled,
+    retry: false,
   });
 }

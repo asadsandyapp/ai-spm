@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from ai_spm.domain.enums import (
     OrganizationStatus,
+    OnboardingStep,
     SubscriptionPlan,
     SubscriptionStatus,
     UserRole,
@@ -69,11 +70,13 @@ async def seed() -> None:
             session.add(
                 Subscription(
                     org_id=org.id,
-                    plan=SubscriptionPlan.FREE,
+                    plan=SubscriptionPlan.PROFESSIONAL,
                     status=SubscriptionStatus.ACTIVE,
-                    max_agents=10,
-                    max_prompts_per_day=1000,
-                    audit_retention_days=90,
+                    onboarding_step=OnboardingStep.COMPLETE,
+                    max_agents=150,
+                    max_prompts_per_day=16667,
+                    max_prompts_per_month=500_000,
+                    audit_retention_days=30,
                 )
             )
             session.add(

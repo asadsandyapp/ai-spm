@@ -1,15 +1,18 @@
-.PHONY: up up-build down logs test test-security migrate seed seed-dev backend frontend agent build demo-sprint1 installer-linux
+.PHONY: up up-build down logs test test-security migrate seed seed-dev backend frontend agent build demo-sprint1 installer-linux deploy-ubuntu
 
 COMPOSE = docker compose -f deploy/docker-compose.yml
+
+# One-shot Ubuntu bootstrap (Docker + env + build + up + health).
+deploy-ubuntu:
+	bash scripts/deploy-ubuntu.sh
 
 # Start stack using local images (does not contact Docker Hub).
 up:
 	$(COMPOSE) up -d
 
-# Rebuild images then start. Uses host network so pulls prefer working IPv4
-# when the machine's IPv6 route to Docker Hub is broken.
+# Rebuild images then start.
 up-build:
-	$(COMPOSE) build --network=host
+	$(COMPOSE) build
 	$(COMPOSE) up -d
 
 down:
@@ -54,4 +57,4 @@ demo-sprint1:
 	bash scripts/demo-sprint1.sh
 
 build:
-	$(COMPOSE) build --network=host
+	$(COMPOSE) build

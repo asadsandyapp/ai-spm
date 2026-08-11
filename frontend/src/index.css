@@ -56,7 +56,6 @@
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
   }
 
-  /* Custom scrollbar for a polished enterprise feel */
   .scroll-thin {
     scrollbar-width: thin;
     scrollbar-color: rgb(176 185 201) transparent;
@@ -70,5 +69,102 @@
   }
   .scroll-thin::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /* —— Marketing —— */
+  .marketing-root {
+    @apply font-marketing bg-marketing-ink text-slate-300 antialiased;
+    background-image:
+      radial-gradient(ellipse 100% 60% at 50% -8%, rgba(45, 212, 191, 0.11), transparent 58%),
+      radial-gradient(ellipse 55% 45% at 100% 15%, rgba(14, 165, 233, 0.06), transparent 52%),
+      linear-gradient(180deg, #070b14 0%, #070b14 100%);
+  }
+
+  .mkt-atmosphere {
+    background-image:
+      linear-gradient(rgba(30, 41, 59, 0.28) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30, 41, 59, 0.28) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 35%, black 15%, transparent 72%);
+  }
+
+  .mkt-btn-primary {
+    @apply inline-flex items-center justify-center gap-2.5 rounded-xl px-7 py-4 text-[17px] font-semibold
+      bg-teal-400 text-marketing-ink shadow-[0_0_0_1px_rgba(45,212,191,0.35),0_10px_28px_-8px_rgba(45,212,191,0.55)]
+      transition-all duration-200 hover:bg-teal-300 hover:shadow-[0_0_0_1px_rgba(45,212,191,0.5),0_14px_32px_-8px_rgba(45,212,191,0.65)]
+      hover:-translate-y-px
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/50 focus-visible:ring-offset-2
+      focus-visible:ring-offset-marketing-ink disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
+  }
+
+  .mkt-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2.5 rounded-xl px-7 py-4 text-[17px] font-semibold
+      text-slate-100 ring-1 ring-inset ring-white/20 bg-white/[0.04] backdrop-blur-sm
+      transition-all duration-200 hover:bg-white/[0.08] hover:text-white hover:ring-white/30
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/40 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .mkt-input {
+    @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3.5 text-[17px] text-slate-100
+      placeholder:text-slate-500 transition-all backdrop-blur-sm
+      focus:border-teal-400/40 focus:outline-none focus:ring-2 focus:ring-teal-400/15 focus:bg-white/[0.06];
+  }
+
+  .mkt-label {
+    @apply mb-2 block text-[15px] font-medium text-slate-300;
+  }
+
+  /* Wider content rail — fills large monitors without sparse gutters */
+  .mkt-shell {
+    @apply mx-auto w-full max-w-[1440px] px-5 sm:px-8 lg:px-10 xl:px-12;
+  }
+
+  .mkt-section {
+    @apply mkt-shell py-14 sm:py-16 lg:py-20;
+  }
+
+  .mkt-eyebrow {
+    @apply text-[13px] font-semibold uppercase tracking-[0.2em] text-teal-400 sm:text-sm;
+  }
+
+  .mkt-h1 {
+    @apply font-display text-[2.85rem] font-bold tracking-tight text-white leading-[1.08]
+      sm:text-5xl md:text-6xl lg:text-[4.25rem] lg:leading-[1.02];
+  }
+
+  .mkt-h2 {
+    @apply font-display text-[1.85rem] font-bold tracking-tight text-white leading-[1.15]
+      sm:text-4xl lg:text-[2.85rem] lg:leading-[1.1];
+  }
+
+  .mkt-lead {
+    @apply text-xl leading-[1.65] text-slate-300 sm:text-[1.35rem] sm:leading-[1.65];
+  }
+
+  .mkt-body {
+    @apply text-lg leading-[1.7] text-slate-300;
+  }
+
+  .mkt-panel {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.1] bg-gradient-to-b from-white/[0.07] to-white/[0.025]
+      shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07)];
+  }
+
+  .mkt-panel-hover {
+    @apply mkt-panel transition-all duration-300 hover:border-teal-400/30 hover:from-white/[0.09] hover:to-white/[0.04]
+      hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.09),0_20px_40px_-24px_rgba(0,0,0,0.8)];
+  }
+
+  .mkt-icon-box {
+    @apply grid h-12 w-12 place-items-center rounded-xl bg-teal-400/10 text-teal-400
+      ring-1 ring-teal-400/25 shadow-[0_0_24px_-8px_rgba(45,212,191,0.45)];
+  }
+
+  .mkt-divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent;
+  }
+
+  .mkt-page-hero {
+    @apply relative overflow-hidden border-b border-white/10 pt-[5rem];
   }
 }

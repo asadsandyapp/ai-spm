@@ -79,7 +79,7 @@ flowchart TB
 | Traffic | Interception | Inspect path |
 |---------|--------------|--------------|
 | LLM **API** hosts (`api.openai.com`, `api.anthropic.com`, …) | Transparent MITM (iptables → agent `:9443`) | Agent → `POST /agent/v1/prompt?inspect_only=true` |
-| Consumer **web UIs** (`chatgpt.com`, `claude.ai`, `gemini.google.com`) | **mitmproxy** on `127.0.0.1:8800` + desktop HTTPS proxy (SPM-compatible; avoids CF Turnstile) | Addon masks org-enabled PII; fire-and-forget audit via agent `127.0.0.1:8092/web-audit` → gateway (**masked content only**). Threat feed includes `pii_detected`. Chrome uses GNOME proxy; Firefox (incl. snap) gets locked manual proxy via `/etc/firefox/policies/policies.json`. |
+| Consumer **web UIs** (`chatgpt.com`, `claude.ai`, `gemini.google.com`) | **mitmproxy** on `127.0.0.1:8800` + desktop HTTPS proxy (SPM-compatible; avoids CF Turnstile) | Addon masks org-enabled PII in **plaintext HTTP** request bodies; fire-and-forget audit via agent `127.0.0.1:8092/web-audit` → gateway (**masked content only**). Threat feed includes `pii_detected`. **Do not** enable the experimental composer page hook (`AISPM_UI_PAGE_HOOK=1`) by default — it masks before submit and hangs ChatGPT replies. Encrypted guest bodies (`gAAAAA`) are left untouched (fail-open for chat UX). Chrome uses GNOME proxy; Firefox (incl. snap) gets locked manual proxy via `/etc/firefox/policies/policies.json`. |
 
 > **Note:** Rust MITM of Cloudflare web UIs triggers Turnstile — use mitmproxy for those sites. There is **no** managed browser extension in the product.
 
@@ -284,7 +284,7 @@ agent-service start
   → spawn: transparent listener | local_api (/web-audit) | optional explicit proxy | heartbeat
 ```
 
-Heartbeat every 60s; on agent 404 (deleted), re-register.
+Heartbeat every 60s; on agent **403 (revoked)** or **404 (deleted)**, write `/etc/ai-spm/protection-disabled`, tear down local interception best-effort, and **do not** auto re-register (masking stops). Reinstall clears the flag and resumes protection.
 
 ### Interception mode hierarchy
 
@@ -609,7 +609,8 @@ React 18 + Vite + TypeScript + Tailwind. Entry: `frontend/src/main.tsx` → `App
 
 | Path | Scope |
 |------|-------|
-| `/login`, `/platform/login` | Public |
+| `/login` | Public (credentials resolve company admin vs platform) |
+| `/platform/login` | Redirects to `/login` |
 | `/dashboard`, `/threats`, `/agents`, `/agents/download`, `/policies`, `/audit`, `/settings` | Admin JWT |
 | `/platform/tenants` | Platform JWT |
 
@@ -901,7 +902,7 @@ cd frontend && npm run build
 | `local_api.rs` | Localhost `/web-audit` bridge for mitmproxy | Keep when transparent MITM / web UI masking is enabled |
 | `network_setup.rs` | iptables + QUIC block | QUIC bypass hole |
 | `gateway/client.rs` | mTLS client | Auth headers + registration retry semantics |
-| `heartbeat.rs` | Liveness / re-register | Permanent exit when unregistered |
+| `heartbeat.rs` | Liveness; on 403/404 disable protection (no auto re-register) | Must not re-enable masking after admin delete/revoke |
 | `config.rs` | Env defaults | Enterprise default flags in installer |
 
 ### Installer / web MITM
@@ -938,10 +939,12 @@ cd frontend && npm run build
 | APScheduler in-process | Fewer moving parts | Not HA-scheduler | Acceptable until scale need |
 | Idempotent agent register by hostname | Reinstall must not burn agent quota | Hostname collisions rare | Prefer keep |
 | Org-bound sealed `.run` installer (Download Agent) | Single opaque file; embeds secrets; SHA refuses casual edit; no editable Scripts folder | Download rotates org token; determined attackers can still unpack | Prefer keep |
+| Paid Starter / Professional / Enterprise (max_agents 25 / 150 / unlimited) | Commercial catalog; no free forever plan; checkout gate until `active` | Dev uses `dev-activate` when Stripe off | Yes |
 | `AISPM_PUBLIC_GATEWAY_URL` for enrollment | Same packages work for localhost Kong and future cloud gateway | Operators must set URL correctly | Prefer keep |
 | `inspect_only` split | Agent keeps real upstream TLS to provider after mask | Two-phase protocol | Yes for API MITM |
 | Dev fallback regex PII without `[ml]` | Local bootstrapping | Weaker detection | Production should install `[ml]` |
 | Fail-open in some agent/mitmproxy audit paths | Don’t hard-break employee chat when gateway down | Temporary unprotected window | **Product decision** — ask before flipping globally to fail-closed |
+| Admin delete/revoke pauses endpoint protection | Agent writes `/etc/ai-spm/protection-disabled`, stops re-register + mitmproxy masking; reinstall clears flag | Must reinstall to resume masking on that PC | Prefer keep |
 
 ---
 

@@ -16,6 +16,15 @@ Defense-in-depth tenant isolation:
 
 See **[docs/SETUP_LINUX_AND_WINDOWS.md](docs/SETUP_LINUX_AND_WINDOWS.md)** for the complete Linux and Windows setup guide.
 
+**New Ubuntu PC (one command):**
+
+```bash
+chmod +x scripts/deploy-ubuntu.sh
+./scripts/deploy-ubuntu.sh
+# Optional: also build sealed agent installer assets
+# ./scripts/deploy-ubuntu.sh --with-installer
+```
+
 ```bash
 # Start full stack (from repo root)
 make up

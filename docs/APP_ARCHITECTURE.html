@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI-SPM — Application Architecture</title>
+<style>
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #172033;
+    background: #fff;
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.45;
+  }
+  .cover {
+    border-bottom: 3px solid #0f4c3a;
+    margin-bottom: 6mm;
+    padding-bottom: 4mm;
+  }
+  .cover .eyebrow {
+    color: #5b6b85;
+    font-size: 8.5pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin: 0 0 2mm;
+  }
+  .cover h1 {
+    color: #0f1b2d;
+    font-size: 22pt;
+    margin: 0 0 2mm;
+  }
+  .cover .subtitle {
+    color: #4a5568;
+    font-size: 10.5pt;
+    margin: 0;
+  }
+  h2 {
+    color: #0f1b2d;
+    font-size: 13pt;
+    border-bottom: 1.5px solid #d5dde8;
+    padding-bottom: 1.5mm;
+    margin: 6mm 0 3mm;
+  }
+  h3 {
+    color: #0f4c3a;
+    font-size: 10.5pt;
+    margin: 4mm 0 2mm;
+  }
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin-bottom: 1.2mm; }
+  .callout {
+    background: #f3faf7;
+    border-left: 3px solid #0f4c3a;
+    padding: 3mm 4mm;
+    margin: 3mm 0 4mm;
+  }
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    margin: 0 0 4mm;
+    table-layout: fixed;
+  }
+  th {
+    background: #0f4c3a;
+    color: #fff;
+    font-size: 8pt;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 2.2mm 2.5mm;
+  }
+  th:first-child { border-radius: 4px 0 0 0; }
+  th:last-child { border-radius: 0 4px 0 0; }
+  td {
+    border-bottom: 1px solid #dfe3ec;
+    border-right: 1px solid #e8ebf2;
+    padding: 2.2mm 2.5mm;
+    vertical-align: top;
+    font-size: 8.8pt;
+    overflow-wrap: anywhere;
+  }
+  td:first-child { border-left: 1px solid #e8ebf2; font-weight: 700; color: #0f4c3a; }
+  tbody tr:nth-child(even) td { background: #f6faf8; }
+  .code {
+    font-family: "DejaVu Sans Mono", Consolas, monospace;
+    font-size: 8pt;
+    background: #eef2f7;
+    padding: 0.5px 3px;
+    border-radius: 2px;
+  }
+  .diagram {
+    background: #f8fafc;
+    border: 1px solid #d5dde8;
+    border-radius: 4px;
+    padding: 3.5mm 4mm;
+    margin: 2mm 0 4mm;
+    font-family: "DejaVu Sans Mono", Consolas, monospace;
+    font-size: 7.6pt;
+    line-height: 1.35;
+    white-space: pre;
+  }
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <p class="eyebrow">AI-SPM</p>
+  <h1>Application Architecture</h1>
+  <p class="subtitle">The application shape we follow — layers, technologies, packages, and how console, gateway, and endpoint agent fit together.</p>
+</div>
+
+<div class="callout">
+  <strong>Purpose.</strong> This document defines the application architecture for AI-SPM: which major components exist, which technologies and packages we use in each layer, and how responsibilities are split. New features should reuse this structure rather than introducing parallel stacks or frameworks.
+</div>
+
+<h2>1. Architecture we follow</h2>
+<p>AI-SPM is a <strong>hybrid endpoint + central multi-tenant gateway</strong> application:</p>
+<ol>
+  <li><strong>Endpoint agent</strong> (Rust) runs on the managed PC — enrolls, intercepts AI traffic, talks to the gateway over mTLS.</li>
+  <li><strong>Security core</strong> (Python FastAPI) runs policies, PII/threat inspection, audit, quotas, and admin/platform business logic.</li>
+  <li><strong>Admin &amp; platform consoles</strong> (React SPA) are the human UI for company and vendor operators.</li>
+  <li><strong>Edge</strong> (Kong) is the secure front door; <strong>Postgres + Redis</strong> are the durable store and cache.</li>
+</ol>
+
+<div class="diagram">Application surfaces
+────────────────────
+ React SPA (admin + platform)          Endpoint PC
+          │                              │
+          │ JWT                          │ agent-service
+          ▼                              ▼
+        Kong  ◄────────── mTLS ──────── agent-core
+          │
+          ▼
+   FastAPI package ai_spm
+   ├── public / admin / agent / platform / billing
+   ├── services (pipeline, policy, audit, …)
+   ├── domain models
+   └── infrastructure adapters
+          │
+    ┌─────┼─────┐
+    ▼     ▼     ▼
+ Postgres Redis  PII / threat scanners</div>
+
+<h2>2. Technology stack (what we use)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:22%">Layer</th>
+      <th style="width:38%">Technology</th>
+      <th style="width:40%">Role</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Backend</td><td>Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, structlog</td><td>Security core package <span class="code">ai_spm</span></td></tr>
+    <tr><td>Frontend</td><td>React 18, TypeScript, Vite 6, React Router 6, TanStack Query 5, Zustand 5, Tailwind 3, Recharts, Lucide</td><td>Admin + platform SPA</td></tr>
+    <tr><td>Database</td><td>PostgreSQL 16 + row-level security</td><td>Tenant-isolated durable store</td></tr>
+    <tr><td>Cache</td><td>Redis 7</td><td>Policy cache, signup limits, prompt quota</td></tr>
+    <tr><td>Background jobs</td><td>APScheduler (in-process)</td><td>Agent offline detector; no separate broker</td></tr>
+    <tr><td>Edge gateway</td><td>Kong (DB-less)</td><td>Rate limit, correlation ID, routing</td></tr>
+    <tr><td>Auth</td><td>bcrypt; tenant JWT; platform JWT; agent mTLS</td><td>Separate secrets per plane</td></tr>
+    <tr><td>PII</td><td>Microsoft Presidio + spaCy (<span class="code">[ml]</span> extras); else regex</td><td>Detect and mask sensitive values</td></tr>
+    <tr><td>Threat</td><td>Guardrails AI Hub when available; else heuristic patterns</td><td>Injection / jailbreak detection</td></tr>
+    <tr><td>Endpoint agent</td><td>Rust (Tokio, hyper, rustls)</td><td>MITM, enrollment, heartbeat, local web-audit</td></tr>
+    <tr><td>Web UI masking</td><td>mitmproxy + Python addon</td><td>ChatGPT / Claude / Gemini site path</td></tr>
+    <tr><td>Object storage</td><td>MinIO</td><td>Installers / artifact stubs</td></tr>
+    <tr><td>Billing</td><td>Stripe webhooks (optional)</td><td>Subscription state</td></tr>
+    <tr><td>Observability</td><td>Prometheus + Grafana</td><td>Metrics and ops dashboards</td></tr>
+    <tr><td>Deploy</td><td>Docker Compose; Kubernetes HPA; Linux systemd / Windows service</td><td>Staging, production, endpoint</td></tr>
+    <tr><td>CI</td><td>GitHub Actions</td><td>pytest + ruff, frontend build, cargo test</td></tr>
+  </tbody>
+</table>
+
+<div class="page-break"></div>
+
+<h2>3. Backend package layout (<span class="code">ai_spm</span>)</h2>
+<p>All backend code lives under <span class="code">backend/src/ai_spm/</span>. We keep a clear ownership split:</p>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Package / area</th>
+      <th>Responsibility</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">admin/</span></td><td>Company admin HTTP surface</td></tr>
+    <tr><td><span class="code">agent/</span></td><td>Endpoint agent HTTP surface (register, heartbeat, prompt, updates)</td></tr>
+    <tr><td><span class="code">platform/</span></td><td>Vendor platform surface + provisioning (metadata only)</td></tr>
+    <tr><td><span class="code">public/</span></td><td>Unauthenticated onboarding (signup / verify)</td></tr>
+    <tr><td><span class="code">billing/</span></td><td>Stripe webhook and subscription helpers</td></tr>
+    <tr><td><span class="code">services/</span></td><td>Business orchestration — prompt pipeline, policy, audit, enrollment, dashboard</td></tr>
+    <tr><td><span class="code">domain/</span></td><td>SQLAlchemy models and enums</td></tr>
+    <tr><td><span class="code">infrastructure/</span></td><td>Adapters: DB, Redis, Presidio, Guardrails, LLM client, auth/password</td></tr>
+    <tr><td><span class="code">tenant/</span></td><td>TenantContext, middleware, RLS, quotas</td></tr>
+    <tr><td><span class="code">jobs/</span></td><td>APScheduler periodic work</td></tr>
+    <tr><td><span class="code">presentation/</span></td><td>Correlation ID, WebSocket helpers</td></tr>
+  </tbody>
+</table>
+
+<h3>Layering rule we follow</h3>
+<ul>
+  <li><strong>Routes</strong> — parse request, auth dependency, call a service, map errors. No business logic.</li>
+  <li><strong>Services</strong> — own the workflow (pipeline order, policy evaluation, audit writes).</li>
+  <li><strong>Domain</strong> — persistence shapes only.</li>
+  <li><strong>Infrastructure</strong> — external systems (scanners, cache, email, DB session). Do not duplicate domain rules here.</li>
+</ul>
+
+<div class="diagram">Request through the application
+───────────────────────────────
+Client → Kong → middleware stack → route handler
+       → service → adapter / Postgres (RLS) → JSON response
+
+Middleware order (fixed):
+  CORS → Correlation ID → Quota → Org-id body guard → TenantContext</div>
+
+<h2>4. Frontend application structure</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Area</th>
+      <th>What we use it for</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">src/pages/</span></td><td>Route-level screens (dashboard, agents, policies, audit, platform tenants, marketing/billing as needed)</td></tr>
+    <tr><td><span class="code">src/components/</span></td><td>Layout, UI primitives, <span class="code">ProtectedRoute</span></td></tr>
+    <tr><td><span class="code">src/hooks/</span></td><td>TanStack Query data hooks, dashboard WebSocket hook</td></tr>
+    <tr><td><span class="code">src/stores/</span></td><td>Zustand auth session (<span class="code">sessionStorage</span>)</td></tr>
+    <tr><td><span class="code">src/lib/</span></td><td>Shared client (<span class="code">api.ts</span>), JWT helpers — all HTTP goes through here</td></tr>
+    <tr><td><span class="code">src/types/</span></td><td>Shared TypeScript shapes for server responses</td></tr>
+  </tbody>
+</table>
+<p><strong>Packages we rely on:</strong> React 18, React Router, TanStack Query (server state), Zustand (session), Tailwind (styling), Recharts (charts), Lucide (icons), Vite (build).</p>
+
+<div class="page-break"></div>
+
+<h2>5. Endpoint agent (Rust workspace)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Crate / area</th>
+      <th>Responsibility</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">agent-core</span></td><td>Config, gateway client, transparent MITM / proxy, local web-audit, network setup</td></tr>
+    <tr><td><span class="code">agent-service</span></td><td>Daemon binary — process lifecycle and startup wiring</td></tr>
+    <tr><td><span class="code">agent-installer</span></td><td>Linux guided installer launcher for sealed packages</td></tr>
+    <tr><td><span class="code">agent-tray</span></td><td>Tray UI placeholder (status only)</td></tr>
+  </tbody>
+</table>
+<p><strong>Runtime stack:</strong> Tokio async runtime, hyper HTTP, rustls for mTLS. Linux enterprise install uses systemd (<span class="code">ai-spm-agent</span>), transparent redirect for AI traffic, CA trust, and mitmproxy for consumer web UIs. Packaging: sealed Linux <span class="code">.run</span> from Admin Download Agent; Windows path via service + WiX MSI.</p>
+
+<h2>6. Security engines (packages)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:28%">Capability</th>
+      <th style="width:36%">Package / module</th>
+      <th style="width:36%">Fallback</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>PII detect / mask</td><td>Presidio Analyzer + Anonymizer, spaCy</td><td>Shared regex recognizers in-repo</td></tr>
+    <tr><td>Threat detect</td><td>Guardrails AI + Hub validators</td><td>Heuristic injection / leakage patterns</td></tr>
+    <tr><td>Policy</td><td><span class="code">PolicyEngine</span> + Redis cache</td><td>—</td></tr>
+    <tr><td>Prompt lifecycle</td><td><span class="code">PromptPipelineService</span></td><td>Fixed step order; fail-closed on scanner errors</td></tr>
+  </tbody>
+</table>
+<p>Optional ML extras are installed via backend <span class="code">[ml]</span> extras. Without them the product still boots using regex / pattern fallbacks.</p>
+
+<h2>7. Data &amp; tenancy packages</h2>
+<ul>
+  <li><strong>ORM / migrations:</strong> SQLAlchemy 2 async + Alembic</li>
+  <li><strong>Driver:</strong> asyncpg</li>
+  <li><strong>Isolation:</strong> JWT <span class="code">org_id</span> → TenantContext → query filters → PostgreSQL RLS (<span class="code">aispm_app</span> / <span class="code">app.current_org_id</span>)</li>
+  <li><strong>Auth helpers:</strong> bcrypt passwords; separate tenant and platform JWT secrets</li>
+</ul>
+
+</body>
+</html>

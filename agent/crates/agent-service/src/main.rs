@@ -8,6 +8,7 @@ use std::sync::Arc;
 use agent_core::endpoint_setup::configure_endpoint;
 use agent_core::heartbeat::run_heartbeat_loop;
 use agent_core::local_api::run_local_api;
+use agent_core::protection::is_protection_disabled;
 use agent_core::proxy::{build_proxy_state, run_explicit_proxy, run_transparent_proxy};
 use agent_core::{ensure_crypto_provider, Config, GatewayClient};
 use thiserror::Error;
@@ -59,6 +60,18 @@ async fn run_agent() -> Result<(), ServiceError> {
         agent_id = ?config.agent_id,
         "starting AI-SPM endpoint agent"
     );
+
+    if is_protection_disabled() {
+        warn!(
+            "protection-disabled flag present — admin revoked/deleted this agent; \
+             skipping MITM and registration. Reinstall the agent to resume protection."
+        );
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl-c");
+        info!("idle disabled agent exiting");
+        return Ok(());
+    }
 
     if let Err(err) = configure_endpoint(&config) {
         error!(error = %err, "endpoint auto-configuration failed; proxy will still start");
@@ -213,8 +226,11 @@ async fn run_agent() -> Result<(), ServiceError> {
 
     let heartbeat_gateway = Arc::clone(&gateway);
     let heartbeat_shutdown = shutdown_rx.clone();
+    let heartbeat_shutdown_tx = shutdown_tx.clone();
     let heartbeat_handle = tokio::spawn(async move {
-        if let Err(err) = run_heartbeat_loop(heartbeat_gateway, heartbeat_shutdown).await {
+        if let Err(err) =
+            run_heartbeat_loop(heartbeat_gateway, heartbeat_shutdown, heartbeat_shutdown_tx).await
+        {
             error!(error = %err, "heartbeat loop exited with error");
         }
     });
@@ -354,7 +370,11 @@ mod windows_svc {
                 internal_shutdown.clone(),
             )));
         }
-        handles.push(tokio::spawn(run_heartbeat_loop(gateway, internal_shutdown)));
+        handles.push(tokio::spawn(run_heartbeat_loop(
+            gateway,
+            internal_shutdown,
+            shutdown_tx,
+        )));
 
         let mut shutdown_rx = shutdown_rx;
         shutdown_rx.changed().await.ok();

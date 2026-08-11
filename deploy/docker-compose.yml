@@ -54,7 +54,13 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
       AISPM_PUBLIC_GATEWAY_URL: ${AISPM_PUBLIC_GATEWAY_URL:-http://localhost:8090}
       AISPM_INSTALLER_LINUX_DIR: /opt/ai-spm/installer-linux
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173","http://localhost:4173","http://127.0.0.1:4173"]'
+      STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
     volumes:
       - ../dist/linux-installer:/opt/ai-spm/installer-linux:ro
       - ../scripts:/opt/ai-spm/scripts-src:ro

@@ -19,11 +19,27 @@ const DOT_STYLES: Record<Tone, string> = {
 };
 
 function toneFor(status: string): Tone {
-  switch (status.toLowerCase()) {
+  switch ((status || "").toLowerCase()) {
+    case "pending":
+    case "incomplete":
+    case "trialing":
+    case "past_due":
+    case "new":
+    case "masked":
+    case "pii_detected":
+    case "policy_violation":
+    case "medium":
+      return "warning";
+    case "contacted":
+    case "prompt_submitted":
+    case "low":
+      return "info";
+    case "won":
     case "online":
     case "active":
     case "allowed":
       return "success";
+    case "lost":
     case "offline":
     case "inactive":
     case "suspended":
@@ -33,18 +49,9 @@ function toneFor(status: string): Tone {
     case "threat_detected":
     case "prompt_blocked":
     case "high":
+    case "canceled":
+    case "expired":
       return "danger";
-    case "pending":
-    case "trialing":
-    case "past_due":
-    case "masked":
-    case "pii_detected":
-    case "policy_violation":
-    case "medium":
-      return "warning";
-    case "prompt_submitted":
-    case "low":
-      return "info";
     default:
       return "neutral";
   }
@@ -57,8 +64,9 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, pulse, className }: StatusBadgeProps) {
-  const tone = toneFor(status);
-  const isLive = status.toLowerCase() === "online";
+  const safe = status || "unknown";
+  const tone = toneFor(safe);
+  const isLive = safe.toLowerCase() === "online";
   return (
     <span className={cn("badge", TONE_STYLES[tone], className)}>
       <span
@@ -68,7 +76,7 @@ export function StatusBadge({ status, pulse, className }: StatusBadgeProps) {
           (pulse ?? isLive) && "animate-pulse-dot",
         )}
       />
-      {titleCase(status)}
+      {titleCase(safe)}
     </span>
   );
 }

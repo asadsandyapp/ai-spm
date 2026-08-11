@@ -2,13 +2,16 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Building2,
+  CreditCard,
   Download,
   FileClock,
+  Inbox,
   LayoutDashboard,
   ScrollText,
   Server,
   Settings,
   ShieldAlert,
+  UserRound,
 } from "lucide-react";
 
 export interface NavItem {
@@ -76,10 +79,20 @@ export const adminNav: NavSection[] = [
     title: "Administration",
     items: [
       {
+        label: "Billing",
+        to: "/billing",
+        icon: CreditCard,
+      },
+      {
         label: "Settings",
         to: "/settings",
         icon: Settings,
         permission: "users:read",
+      },
+      {
+        label: "Account",
+        to: "/account",
+        icon: UserRound,
       },
     ],
   },
@@ -94,6 +107,17 @@ export const platformNav: NavSection[] = [
         to: "/platform/tenants",
         icon: Building2,
         permission: "tenants:read",
+      },
+      {
+        label: "Sales leads",
+        to: "/platform/leads",
+        icon: Inbox,
+        permission: "tenants:read",
+      },
+      {
+        label: "Account",
+        to: "/platform/account",
+        icon: UserRound,
       },
     ],
   },

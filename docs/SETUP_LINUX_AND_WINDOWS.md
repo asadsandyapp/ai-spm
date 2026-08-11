@@ -112,7 +112,28 @@ cd AI-SPM
 
 This starts Postgres, Redis, FastAPI, Kong, Prometheus, Grafana, and the production-built admin dashboard.
 
-### Step 1 — Start services
+### One-shot Ubuntu deploy (recommended on a new PC)
+
+From the repo root on Ubuntu:
+
+```bash
+chmod +x scripts/deploy-ubuntu.sh
+./scripts/deploy-ubuntu.sh
+```
+
+The script installs Docker (if needed), writes `deploy/.env` / `frontend/.env`, builds images, starts the stack, waits for health, and prints login URLs.
+
+Useful flags:
+
+```bash
+./scripts/deploy-ubuntu.sh --reset              # wipe volumes + rebuild
+./scripts/deploy-ubuntu.sh --with-installer     # also build agent Download Agent assets
+./scripts/deploy-ubuntu.sh --with-dev           # Python + Node for native FE/BE work
+./scripts/deploy-ubuntu.sh --status             # health + URLs
+./scripts/deploy-ubuntu.sh --down               # stop stack
+```
+
+### Step 1 — Start services (manual)
 
 **Linux (with Make):**
 

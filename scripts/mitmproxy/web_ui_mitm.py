@@ -12,6 +12,7 @@ Patterns: pii_rules.py (parity with gateway patterns.py).
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -26,6 +27,7 @@ from mitmproxy import ctx, http
 from pii_rules import ENTITY_APPLY_ORDER, MASK_FORMATS, REGEX_PATTERNS, iter_patterns_for
 
 PII_POLICY_PATH = Path("/etc/ai-spm/pii-policy.json")
+PROTECTION_DISABLED_PATH = Path("/etc/ai-spm/protection-disabled")
 WEB_AUDIT_URL = "http://127.0.0.1:8092/web-audit"
 DEFAULT_ENABLED = frozenset(
     {"EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "CNIC", "CREDIT_CARD"}
@@ -33,6 +35,17 @@ DEFAULT_ENABLED = frozenset(
 
 MAX_SCAN_BYTES = 256_000
 AISPM_HOOK_PATH = "/aispm-web-mask.js"
+
+# Page/composer JS hook masks *before* submit and hooks TextEncoder/JSON/crypto.
+# That shows ***@***.com in the bubble and often hangs ChatGPT with no answer.
+# Default OFF — mask via HTTP request bodies only (skip encrypted gAAAAA payloads).
+# Set AISPM_UI_PAGE_HOOK=1 only for experiments that accept broken chat UX.
+UI_PAGE_HOOK_ENABLED = os.environ.get("AISPM_UI_PAGE_HOOK", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 # Paths that may carry user prompts (logged-in + guest/unauth ChatGPT web).
 _SCAN_PATH_HINTS = (
@@ -73,7 +86,6 @@ _AUDIT_PATH_HINTS = (
     "/backend-anon/f/conversation",
     "/backend-anon/conversation",
     "/unauth-mweb/conversation",
-    "prompt-autocompletions",
     "/chat_conversations/",
     "/completion",
     "/append_message",
@@ -81,6 +93,19 @@ _AUDIT_PATH_HINTS = (
     "/v1beta/",
     "/streamGenerate",
     "/StreamGenerate",
+)
+
+# Paths that look like conversation URLs but are preflight / typing helpers —
+# auditing them creates many rows for one user prompt.
+_AUDIT_EXCLUDE_PATH_HINTS = (
+    "prompt-autocompletions",
+    "/prepare",
+    "/init",
+    "/sentinel",
+    "/lat/",
+    "/attachments",
+    "/files",
+    "/share",
 )
 
 # Response paths that must stream (never buffer full answer).
@@ -176,6 +201,8 @@ def should_scan_path(path: str) -> bool:
 def should_audit_path(path: str) -> bool:
     p = (path or "").lower()
     if any(n in p for n in _NOISE_PATH_HINTS):
+        return False
+    if any(n in p for n in _AUDIT_EXCLUDE_PATH_HINTS):
         return False
     return any(h.lower() in p for h in _AUDIT_PATH_HINTS)
 
@@ -339,6 +366,14 @@ def extract_user_prompt(raw: str, host: str) -> str | None:
     return None
 
 
+def protection_disabled() -> bool:
+    """Admin deleted/revoked the endpoint agent — do not mask until reinstall."""
+    try:
+        return PROTECTION_DISABLED_PATH.is_file()
+    except OSError:
+        return False
+
+
 def mask_pii(
     text: str, enabled: frozenset[str] | None = None
 ) -> tuple[str, int, list[str]]:
@@ -446,6 +481,33 @@ def mask_raw_body(
     return raw, 0, []
 
 
+_AUDIT_DEDUPE_LOCK = threading.Lock()
+_AUDIT_DEDUPE: dict[str, float] = {}
+_AUDIT_DEDUPE_TTL_SEC = 45.0
+
+
+def _audit_dedupe_key(provider: str, masked_prompt: str) -> str:
+    # Normalize whitespace so tiny composer diffs don't fan out many rows.
+    norm = " ".join((masked_prompt or "").split()).casefold()[:500]
+    return f"{provider}|{norm}"
+
+
+def _should_emit_audit(provider: str, masked_prompt: str) -> bool:
+    """Return False if we already audited this prompt recently (same send / retries)."""
+    key = _audit_dedupe_key(provider, masked_prompt)
+    now = time.monotonic()
+    with _AUDIT_DEDUPE_LOCK:
+        # Opportunistic cleanup
+        stale = [k for k, ts in _AUDIT_DEDUPE.items() if now - ts > _AUDIT_DEDUPE_TTL_SEC]
+        for k in stale:
+            _AUDIT_DEDUPE.pop(k, None)
+        prev = _AUDIT_DEDUPE.get(key)
+        if prev is not None and now - prev < _AUDIT_DEDUPE_TTL_SEC:
+            return False
+        _AUDIT_DEDUPE[key] = now
+        return True
+
+
 def _post_web_audit(payload: dict[str, Any]) -> None:
     try:
         data = json.dumps(payload).encode("utf-8")
@@ -470,6 +532,12 @@ def report_web_audit(
     hit_count: int = 0,
 ) -> None:
     if not masked_prompt:
+        return
+    if not _should_emit_audit(provider, masked_prompt):
+        ctx.log.info(
+            f"[AI-SPM] skip duplicate web-audit for {provider} "
+            f"({len(masked_prompt)} chars)"
+        )
         return
     payload = {
         "provider": provider,
@@ -953,13 +1021,17 @@ def build_ui_redact_script(enabled: frozenset[str]) -> str:
 
 class WebUiPiiMasker:
     def responseheaders(self, flow: http.HTTPFlow) -> None:
-        """Stream AI answers; strip CSP so guest page hooks can run."""
+        """Stream AI answers; optionally strip CSP when page hook is enabled."""
+        if protection_disabled():
+            return
         if not is_web_ui_host(flow.request.host):
             return
         if not flow.response:
             return
         if should_stream_response(flow):
             flow.response.stream = True
+            return
+        if not UI_PAGE_HOOK_ENABLED:
             return
         ct = flow.response.headers.get("content-type", "").lower()
         if "text/html" in ct:
@@ -975,15 +1047,17 @@ class WebUiPiiMasker:
                     del flow.response.headers[h]
 
     def request(self, flow: http.HTTPFlow) -> None:
+        if protection_disabled():
+            return
         if is_web_ui_host(flow.request.host):
             hook_path = (flow.request.path or "").split("?", 1)[0]
-            # Chrome often registers a SW that serves unhooked HTML — block it.
             path_l = hook_path.lower()
-            if flow.request.method == "GET" and (
+            # Only interfere with service workers when the page hook needs a clean HTML inject.
+            if UI_PAGE_HOOK_ENABLED and flow.request.method == "GET" and (
                 "service-worker" in path_l
                 or path_l.endswith("/sw.js")
                 or path_l.endswith("/serviceworker.js")
-                or "/sw/" in path_l and path_l.endswith(".js")
+                or ("/sw/" in path_l and path_l.endswith(".js"))
             ):
                 flow.response = http.Response.make(
                     404,
@@ -995,6 +1069,13 @@ class WebUiPiiMasker:
                 )
                 return
             if flow.request.method == "GET" and hook_path == AISPM_HOOK_PATH:
+                if not UI_PAGE_HOOK_ENABLED:
+                    flow.response = http.Response.make(
+                        204,
+                        b"",
+                        {"Cache-Control": "no-store"},
+                    )
+                    return
                 enabled = load_enabled_entities()
                 js_body = build_ui_redact_script_body(enabled)
                 flow.response = http.Response.make(
@@ -1029,22 +1110,20 @@ class WebUiPiiMasker:
         if not raw or len(raw) > MAX_SCAN_BYTES:
             return
 
+        # Never rewrite Fernet/encrypted guest payloads — corrupts the body and
+        # ChatGPT/Claude return 500 / hang with no answer.
+        sample = (raw or "")[:240]
+        if "gAAAAA" in sample or '"ciphertext"' in sample.lower():
+            ctx.log.info(
+                f"[AI-SPM] skip HTTP body rewrite (encrypted) on {flow.request.path[:90]}"
+            )
+            return
+
         enabled = load_enabled_entities()
         provider = provider_from_host(flow.request.host)
         user_prompt = extract_user_prompt(raw, flow.request.host)
 
-        path_l = (flow.request.path or "").lower()
-        is_guest_send = (
-            ("unauth-mweb" in path_l or "backend-anon" in path_l)
-            and "conversation" in path_l
-        )
-
         if not user_prompt and not looks_like_pii(raw):
-            if is_guest_send and "@" not in normalize_escaped_pii(raw):
-                ctx.log.warn(
-                    f"[AI-SPM] guest send encrypted body on {flow.request.path[:90]} "
-                    f"(len={len(raw)}) — composer must be masked before send"
-                )
             return
 
         t0 = time.perf_counter()
@@ -1067,13 +1146,6 @@ class WebUiPiiMasker:
                 hit_count=p_hits,
             )
 
-        if hit_count == 0 and "conversation" in path_l and "@" not in normalize_escaped_pii(raw):
-            ctx.log.warn(
-                f"[AI-SPM] guest send has no plaintext PII in {flow.request.path[:90]} "
-                f"(len={len(raw)} enc={'gAAAAA' in raw[:200]}) — page hook must mask composer first"
-            )
-            return
-
         if hit_count == 0:
             return
 
@@ -1086,6 +1158,8 @@ class WebUiPiiMasker:
         )
 
     def response(self, flow: http.HTTPFlow) -> None:
+        if protection_disabled():
+            return
         if not is_web_ui_host(flow.request.host) or not flow.response:
             return
         if getattr(flow.response, "stream", False):
@@ -1095,6 +1169,8 @@ class WebUiPiiMasker:
         enabled = load_enabled_entities()
 
         if "text/html" in content_type:
+            if not UI_PAGE_HOOK_ENABLED:
+                return
             html = flow.response.get_text(strict=False)
             if not html or "data-aispm-ui-mask" in html or AISPM_HOOK_PATH in html:
                 return
@@ -1149,6 +1225,11 @@ class WebUiPiiMasker:
         raw = flow.response.get_text(strict=False)
         if not raw or len(raw) > MAX_SCAN_BYTES:
             return
+        # Do not rewrite JSON that carries ciphertext / conversation history blobs —
+        # mutating them can blank the chat UI after send.
+        sample = (raw or "")[:240]
+        if "gAAAAA" in sample or '"ciphertext"' in sample.lower():
+            return
         masked, hit_count, _ents = mask_raw_body(raw, enabled)
         if hit_count == 0:
             return
@@ -1157,33 +1238,10 @@ class WebUiPiiMasker:
             del flow.response.headers["content-length"]
 
     def websocket_message(self, flow: http.HTTPFlow) -> None:
-        if not is_web_ui_host(flow.request.host):
-            return
-        if flow.websocket is None or not flow.websocket.messages:
-            return
-        enabled = load_enabled_entities()
-        if not enabled:
-            return
-        msg = flow.websocket.messages[-1]
-        if not msg.from_client:
-            return
-        try:
-            if isinstance(msg.content, (bytes, bytearray)):
-                if len(msg.content) > MAX_SCAN_BYTES:
-                    return
-                text = msg.content.decode("utf-8", errors="replace")
-            else:
-                text = str(msg.content)
-        except Exception:
-            return
-        if "@" not in text and not looks_like_pii(text):
-            return
-        masked, n, _ents = mask_raw_body(text, enabled)
-        if n == 0 and "@" in text:
-            masked, n, _ents = mask_pii(text, enabled)
-        if n == 0:
-            return
-        msg.content = masked.encode("utf-8")
+        # Do not rewrite ChatGPT/Claude WebSocket frames. Mutating them causes
+        # ABNORMAL_CLOSURE and a stuck spinner with no answer. Mask via HTTP
+        # conversation POSTs only (page hook stays off by default).
+        return
 
 
 addons = [WebUiPiiMasker()]

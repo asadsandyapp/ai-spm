@@ -213,6 +213,8 @@ install_binary() {
 
 write_env_file() {
   echo "→ Writing ${ENV_FILE}..."
+  # Resume protection after reinstall (admin delete/revoke sets this latch).
+  rm -f /etc/ai-spm/protection-disabled
   cat > "${ENV_FILE}" <<EOF
 AISPM_GATEWAY_URL=${GATEWAY_URL}
 AISPM_ORG_ID=${ORG_ID}
@@ -1046,6 +1048,12 @@ main() {
 
   install_dependencies
   ensure_service_user
+  # Clear admin delete/revoke latch first — otherwise a partial binary-only update
+  # leaves masking off while services look "active".
+  if [[ -f /etc/ai-spm/protection-disabled ]]; then
+    echo "→ Clearing protection-disabled latch (resume masking after reinstall)..."
+    rm -f /etc/ai-spm/protection-disabled
+  fi
   build_agent
   install_binary
   write_env_file

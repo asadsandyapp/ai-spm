@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { LogOut } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { useAuthStore } from "@/stores/auth";
@@ -12,6 +12,8 @@ interface SidebarProps {
   /** Display name for the account footer (e.g. user email or "Platform Ops"). */
   accountName: string;
   accountSub: string;
+  /** Route for profile / account settings. */
+  accountTo?: string;
 }
 
 export function Sidebar({
@@ -19,6 +21,7 @@ export function Sidebar({
   onLogout,
   accountName,
   accountSub,
+  accountTo,
 }: SidebarProps) {
   const permissions = useAuthStore((s) => s.permissions());
 
@@ -45,6 +48,7 @@ export function Sidebar({
                   <li key={item.to}>
                     <NavLink
                       to={item.to}
+                      end={item.to === "/platform/tenants"}
                       className={({ isActive }) =>
                         cn(
                           "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
@@ -70,17 +74,39 @@ export function Sidebar({
 
       <div className="border-t border-ink-800 p-3">
         <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-            {initials(accountName) || "AI"}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">
-              {accountName}
-            </p>
-            <p className="truncate text-xs text-ink-400">
-              {titleCase(accountSub)}
-            </p>
-          </div>
+          {accountTo ? (
+            <Link
+              to={accountTo}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-md hover:opacity-90"
+              title="Account settings"
+            >
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-600 text-xs font-semibold text-white">
+                {initials(accountName) || "AI"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">
+                  {accountName}
+                </p>
+                <p className="truncate text-xs text-ink-400">
+                  {titleCase(accountSub)}
+                </p>
+              </div>
+            </Link>
+          ) : (
+            <>
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-600 text-xs font-semibold text-white">
+                {initials(accountName) || "AI"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">
+                  {accountName}
+                </p>
+                <p className="truncate text-xs text-ink-400">
+                  {titleCase(accountSub)}
+                </p>
+              </div>
+            </>
+          )}
           <button
             onClick={onLogout}
             title="Sign out"

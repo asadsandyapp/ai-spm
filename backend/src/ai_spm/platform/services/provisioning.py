@@ -7,7 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_spm.config import get_settings
-from ai_spm.domain.enums import OrganizationStatus, SubscriptionPlan, SubscriptionStatus, UserRole
+from ai_spm.domain.enums import (
+    OnboardingStep,
+    OrganizationStatus,
+    SubscriptionPlan,
+    SubscriptionStatus,
+    UserRole,
+)
+from ai_spm.billing.entitlements import get_plan
 from ai_spm.domain.models import (
     Department,
     EmailVerificationToken,
@@ -87,12 +94,13 @@ class ProvisioningService:
 
         subscription = Subscription(
             org_id=org.id,
-            plan=SubscriptionPlan.FREE,
-            status=SubscriptionStatus.TRIALING,
-            max_agents=settings.default_free_max_agents,
-            max_prompts_per_day=settings.default_free_max_prompts_per_day,
-            audit_retention_days=90,
-            expires_at=datetime.now(UTC) + timedelta(days=14),
+            plan=SubscriptionPlan.STARTER,
+            status=SubscriptionStatus.INCOMPLETE,
+            onboarding_step=OnboardingStep.REGISTERED,
+            max_agents=get_plan(SubscriptionPlan.STARTER).max_agents,
+            max_prompts_per_day=get_plan(SubscriptionPlan.STARTER).max_prompts_per_day,
+            max_prompts_per_month=get_plan(SubscriptionPlan.STARTER).max_prompts_per_month,
+            audit_retention_days=get_plan(SubscriptionPlan.STARTER).audit_retention_days,
         )
         session.add(subscription)
 
@@ -159,6 +167,13 @@ class ProvisioningService:
         )
         org = org_result.scalar_one()
         org.status = OrganizationStatus.ACTIVE
+
+        sub_result = await session.execute(
+            select(Subscription).where(Subscription.org_id == org.id)
+        )
+        sub = sub_result.scalar_one_or_none()
+        if sub:
+            sub.onboarding_step = OnboardingStep.EMAIL_VERIFIED
 
         await session.commit()
 

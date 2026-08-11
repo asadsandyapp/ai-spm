@@ -101,6 +101,6 @@ def _platform_role_permissions(role: str) -> list[str]:
     mapping = {
         "platform_super": ["tenants:*", "billing:read", "billing:write"],
         "platform_support": ["tenants:read", "tenants:suspend", "tenants:activate"],
-        "platform_billing": ["billing:*", "tenants:read"],
+        "platform_billing": ["billing:*", "tenants:read", "tenants:activate"],
     }
     return mapping.get(role, ["tenants:read"])

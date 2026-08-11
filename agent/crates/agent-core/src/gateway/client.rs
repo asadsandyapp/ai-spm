@@ -190,6 +190,10 @@ impl GatewayClient {
         *self.agent_id.write().expect("agent_id lock poisoned") = Some(agent_id);
     }
 
+    pub fn clear_agent_id(&self) {
+        *self.agent_id.write().expect("agent_id lock poisoned") = None;
+    }
+
     /// Persist PEM material from registration to the configured cert paths.
     pub fn save_registration_certs(
         cert_path: &str,
